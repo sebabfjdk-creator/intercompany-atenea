@@ -1,0 +1,208 @@
+﻿# Prompt Final — Plataforma Intercompany Colombia ↔ España · Atenea Mobile S.A.S.
+
+> **Instrucciones de uso:** Crea la carpeta `intercompany-atenea/` con la subcarpeta `data/` conteniendo los 5 archivos de §A. Abre Claude Code dentro de esa carpeta y pega este prompt completo. Todas las decisiones están cerradas — no hay [CONFIRMAR] pendientes. Empieza a construir.
+
+---
+
+## 0. Rol y objetivo
+
+Actúa como equipo senior: arquitecto de software, backend Python, frontend React/TS, BI/Data, UX/UI, QA y DevOps, con experiencia en conciliación contable e IA para detección de anomalías.
+
+**Objetivo:** plataforma web que automatice la conciliación intercompany entre Colombia (Siesa) y España (DELSOL) de Atenea Mobile S.A.S. Son los mismos movimientos en dos libros — en teoría sin diferencias; el sistema las encuentra, explica y gestiona. Hoy es manual: 10+ días por rubro. Meta: minutos, con trazabilidad y auditoría completa.
+
+---
+
+## A. Archivos en `data/` (ya preparados)
+
+1. **`Homologacion_de_cuentas_COMPLETA_Atenea.xlsx`** — tabla maestra. Hojas:
+   - `Gastos`: clase 5 CO ↔ clase 6 ES
+   - `Ingresos`: clase 4 CO ↔ clase 7 ES
+   - `Clientes`: cuentas 430/431 ES ↔ NIT bajo cuentas 1305 CO
+   - `Proveedores`: cuentas 410 ES ↔ NIT bajo cuentas 22/2305/2335 CO
+   - `Puente Terceros`: 1.806 terceros con cuenta ES + NIF normalizado + NIT Colombia (tabla de lookup, fuente de verdad)
+   - `Concepto→Tercero`: muestra del etiquetado de movimientos ES por concepto
+   - `BALANCE`: pares de balance ya homologados
+   - `Otras (no PYG)`: cuentas de balance/patrimonio/impuestos/activos fijos pendientes
+   - **Cargarlo como tabla de configuración editable en la app.**
+
+2. **`Copia_de_Consulta__Mayor_y_balances_Febrero_-_Marzo_Atenea.xlsx`** — Colombia Siesa: balances + movimientos Ene–Mar 2026.
+
+3. **`Ok_-_Atenea_consolidado_Enero_-_Marzo.xlsx`** — España DELSOL: balances + Libro Mayor Ene–Mar 2026.
+
+4. **`Reporte_de_terceros.xlsx`** — catálogo DELSOL: hoja `Clientes` (1.618 filas) y hoja `proveedor` (188 filas). Columnas: CÓDIGO (cuenta 430/431/410) · NOMBRE FISCAL · NOMBRE COMERCIAL · N.I.F. (= NIT Colombia) · POBLACIÓN · PROVINCIA.
+
+5. **`COMPARATIVA_PYG_ATENEA_bosquejo.xlsx`** — output deseado: replicar exactamente las hojas `Comparativa` (total CO / cuentas ES / fila DIFERENCIAS por mes) y `Resumen` (por gran rubro con anotaciones).
+
+---
+
+## B. Decisiones cerradas — no preguntar
+
+| Decisión | Valor |
+|---|---|
+| Moneda | Todo COP. Si un archivo ES dice "Euros", es etiqueta incorrecta. Sin TRM. |
+| Datos iniciales | Ene–Mar 2026. Incremental mensual: el usuario sube los archivos cada mes. |
+| Formato de archivos | Permanente: Libro Mayor ES + Siesa CO en Excel, para siempre. Los parsers son definitivos. |
+| Cierre de mes | Automático al subir los archivos de ese mes. Inmutable después. Cambios = nueva versión. |
+| Modelo de saldo | **Acumulado rolling**: cada mes suma al anterior, mostrando saldo final al cierre de cada periodo. La comparativa muestra movimiento mensual Y saldo acumulado. |
+| Alcance MVP | PYG primero (gastos + ingresos), luego terceros (AR/AP) y balance. |
+| Umbral de tolerancia | `\|dif\| ≤ $1.000 COP` o `≤ 0,5%` sobre la base mayor = conciliado. Parametrizable. |
+| Convención de signos | Neto = Débito − Crédito. Normalizar por clase: ingresos y pasivos en naturaleza crédito; gastos y activos en débito. |
+| Hosting | **Railway** (railway.app). Docker + PostgreSQL incluido. ~$5–15 USD/mes. |
+| Internet | Siempre requerido — sin modo offline. |
+| ICBF / SENA | Parafiscales propios de Colombia, sin equivalente en España. Diferencia intercompany estructural esperada; marcar con causa `parafiscal_co`. |
+
+---
+
+## C. Usuarios y roles (3 usuarios)
+
+| Usuario | Rol | Permisos |
+|---|---|---|
+| Admin1 (responsable España) | `admin` | Lee y modifica todo: Colombia, España, homologación, cierres, aprobaciones |
+| Admin2 (responsable Colombia) | `admin_co` | Lee y modifica Colombia. **Solo lectura en España.** No puede modificar datos del libro España. |
+| Usuario 3 (futuro financiero) | `admin` | Igual que Admin1 (cuando se incorpore) |
+
+Implementar con JWT. Middleware que bloquea escritura sobre datos España al rol `admin_co`. Auditoría de cada cambio (quién, qué, cuándo, valor anterior/nuevo).
+
+---
+
+## D. Parsers de ingesta — detalles técnicos críticos
+
+### Colombia (Siesa)
+- Balances: 2 filas de cabecera. Cuentas jerárquicas por longitud de código (1 → 11 → 1120 → 112005 → 11200501). Hoja `Balance_Enero` y `Balance_Febrero-Marzo`.
+- Movimientos: columnas `Cuenta | Nombre | Tercero (NIT) | Nombre tercero | Referencia | F.creación | F.pago | Saldo anterior | Débito | Crédito | Saldo`. Hojas `Mvto_Enero` y `Mvto_Febrero-Marzo`.
+- Números: punto decimal estándar. NIT en columna 3 (sin dígito de verificación generalmente).
+
+### España (DELSOL) — el más complejo
+- **Formato Libro Mayor impreso**: NO es tabla. Tiene metadatos de cabecera, bloques por cuenta.
+- Detectar bloque: fila con patrón `^(\d{3}\.\d\.\d\.\d{3})\s+(.*)` = apertura de cuenta. Propagar ese código a cada movimiento del bloque.
+- Descartar filas: `Anterior:`, `Total:`, `Total de cuenta:`, vacías, metadatos.
+- Columnas de movimiento: `Fecha | Dia | Asto. | Ord | Concepto | Docum. | Debe | Haber | Saldo`.
+- **Formato numérico español** — implementar `parse_es_number()`:
+  ```python
+  def parse_es_number(v) -> float:
+      if v is None: return 0.0
+      if isinstance(v, (int, float)): return float(v)
+      s = str(v).strip()
+      neg = s.endswith('-')
+      s = s.rstrip('-').strip().replace('.', '').replace(',', '.')
+      try: f = float(s)
+      except: return 0.0
+      return -f if neg else f
+  # Tests: parse_es_number('4.500.000,00-') == -4500000.0 ✓
+  #        parse_es_number('1.234.567,89 ') == 1234567.89 ✓
+  ```
+
+### Puente NIF↔NIT — función crítica
+```python
+import re
+
+def normalizar_nif(nif: str) -> str:
+    s = re.sub(r'[\s.]', '', str(nif).upper())
+    s = re.sub(r'-[0-9A-Z]$', '', s)   # quitar dígito de verificación
+    s = re.sub(r'[A-Z]$', '', s)        # quitar letra final
+    return s.strip()
+
+# Tests:
+# normalizar_nif('901128135-5')     → '901128135'
+# normalizar_nif('901207879S')      → '901207879'
+# normalizar_nif('1.035.864.525-0') → '1035864525'
+# normalizar_nif('70901974-N')      → '70901974'
+# normalizar_nif('B12550877')       → 'B12550877' (NIF español, mantener)
+```
+
+**Lookup al ingerir**: cuenta ES 430/410 → `tercero_bridge.nif_normalizado` = NIT Colombia. Si NIF empieza con letra → entidad española (cruce por nombre como fallback).
+
+### Etiquetado por concepto (movimientos ES sin código de tercero)
+Para movimientos clase 6/7 donde el tercero aparece solo como texto en `Concepto`:
+1. Limpiar concepto: quitar prefijo de fecha `MM/YYYY`, sufijos de factura `S. FRA: XXXX`, normalizar (mayúsculas, sin acentos, sin signos).
+2. Buscar en `tercero_bridge.nombre_fiscal` con `token_set_ratio` (SequenceMatcher). Umbral: ≥ 0.65.
+3. Asignar: score ≥ 0.85 → Alta; 0.70–0.84 → Media; 0.65–0.69 → Baja (marcar para revisión).
+4. Guardar `movimiento.nit_co` y `movimiento.conf_tercero`.
+
+**Nota futura:** el Libro Diario de España (asientos individuales con cuenta directa) permite atribución exacta sin necesidad de parsear el concepto. Diseñar el adapter con ese punto de extensión.
+
+---
+
+## E. Modelo de datos
+
+```sql
+-- Catálogo
+source_system (id, nombre, pais, tipo_formato)
+account (id, codigo, nombre, sistema_id, tipo, nivel)
+account_mapping (id, cuenta_co_patron, cuenta_es, grupo_homologado, tipo_relacion, confianza, activo)
+tercero_bridge (id, cuenta_es, nombre_fiscal, nif_normalizado, tipo_nif, nit_colombia, tipo, activo)
+
+-- Ingesta
+import_batch (id, sistema_id, periodo_mes, fecha_carga, usuario_id, archivo_hash, estado)
+journal_entry (id, batch_id, cuenta_id, tercero_nit, fecha, debe, haber, neto, concepto, referencia, periodo_mes)
+                -- + nit_co, conf_tercero, cuenta_es_origen (del puente)
+
+-- Conciliación
+reconciliation_group (id, grupo_homologado, periodo_mes, total_co, total_es, diferencia, pct_dif, estado, umbral_aplicado)
+running_balance (id, grupo_homologado, periodo_mes, saldo_acumulado_co, saldo_acumulado_es, dif_acumulada)
+exception (id, reconciliation_id, causa, comentario, etiqueta, usuario_id, ts)
+approval (id, reconciliation_id, estado, usuario_revisor, usuario_aprobador, ts_revision, ts_aprobacion)
+audit_log (id, entidad, entidad_id, accion, valor_antes, valor_despues, usuario_id, ts)  -- append-only
+```
+
+---
+
+## F. Motor de conciliación
+
+1. **Unidad**: grupo homologado × mes. `suma_neto_CO(mes)` vs `suma_neto_ES(mes)`.
+2. **Saldo acumulado**: al cerrar el mes, calcular `running_balance` = suma de todos los meses hasta ese periodo.
+3. **Diferencia**: `dif = neto_CO − neto_ES`. Guardar ambos lados + dif + % sobre base mayor.
+4. **Estado**: `conciliado | excepción | en_revisión | aprobado | con_observación`.
+5. **Causas de excepción**: redondeo, timing/periodificación, parafiscal_co (ICBF/SENA), diferencia_nif, error_imputación, sin_homologar, pendiente_libro_diario.
+6. **Anotaciones por celda** en el resumen (igual que en la hoja Resumen del bosquejo).
+
+---
+
+## G. Funcionalidades del MVP
+
+- Ingesta mensual: subir Excel → parser → BD → cierre automático del periodo.
+- Gestión de homologación: cargar `Homologacion_de_cuentas_COMPLETA_Atenea.xlsx`, editable desde la app, reportar cuentas con movimiento aún sin homologar.
+- Tablero **Comparativa**: por rubro, fila total CO + cuentas ES que lo componen + fila DIFERENCIAS por mes (réplica exacta del bosquejo).
+- Tablero **Resumen**: por gran rubro, saldo acumulado, diferencias, anotaciones por celda, exportar a Excel/PDF.
+- Vista **AR/AP por tercero**: para cada NIT, saldo Colombia (1305/22xx) vs saldo España (430/410), diferencia.
+- Bandeja de **excepciones**: filtrar por rubro, mes, causa, estado. Workflow aprobación.
+- **Detección de anomalías v1**: z-score sobre serie mensual por cuenta, cuentas sin homologar con movimiento, terceros con conf_tercero Baja.
+- Módulo de **auditoría**: log inmutable, visible desde la app.
+
+---
+
+## H. Arquitectura y stack
+
+- **Backend**: Python 3.11+, FastAPI, pandas + openpyxl (ingesta), Pydantic, SQLAlchemy + Alembic.
+- **BD**: PostgreSQL (Railway provee una instancia automáticamente).
+- **Frontend**: React + TypeScript + Vite + Tailwind, Recharts (gráficos), TanStack Table (grillas grandes).
+- **Auth**: JWT, middleware de rol por ruta.
+- **Deploy**: Docker + docker-compose (api + web + db). Railway detecta el Dockerfile automáticamente y despliega con un push a GitHub.
+- **Estructura repo**:
+  ```
+  intercompany-atenea/
+  ├── backend/
+  │   ├── app/ (api, routers, auth, deps)
+  │   ├── ingestion/ (adapters: colombia.py, espana.py, terceros.py)
+  │   ├── domain/ (reconciliacion.py, anomalias.py, running_balance.py)
+  │   ├── db/ (models.py, migrations/)
+  │   └── tests/
+  ├── frontend/
+  │   └── src/pages/ (Comparativa, Resumen, Terceros, Excepciones, Auditoria, Config)
+  ├── data/  (archivos Excel — solo para dev/test)
+  ├── Dockerfile
+  ├── docker-compose.yml
+  └── README.md
+  ```
+
+---
+
+## I. Primera tarea (empezar aquí)
+
+1. **Fase 0 — Andamiaje**: repo + docker-compose (api + web + db) + README + esquema BD inicial + CI mínima.
+2. **Fase 1 — Parsers**: adapter España con `parse_es_number()` + tests contra el Libro Mayor real (verificar que totales por cuenta cuadran con las filas `Total de cuenta:`). Luego adapter Colombia.
+3. **Fase 1b — Puente terceros**: cargar `Reporte_de_terceros.xlsx`, implementar `normalizar_nif()`, tests con los 4 formatos de NIF y verificación de ≥ 5 cruces NIF→NIT contra Mvto de Colombia.
+4. **Fase 2 — Homologación + primer cruce PYG**: cargar homologación como tabla editable, ejecutar cruce PYG por grupo×mes con saldo acumulado, comparar resultado contra la hoja `Comparativa` del bosquejo. Si los totales por mes coinciden, la base está sólida.
+
+Trabaja en commits pequeños, explicando cada decisión contable. Si algo de los datos contradice estas instrucciones, avísalo antes de continuar.
+

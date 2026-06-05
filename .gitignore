@@ -1,0 +1,42 @@
+# ---- Datos financieros (NO versionar) ----
+data/*.xlsx
+data/*.xls
+*.xlsx
+*.xls
+!docs/**/*.xlsx
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# ---- Node / Frontend ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# ---- Entorno / secretos ----
+.env
+.env.*
+!.env.example
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Scratch ----
+_inspect.py
+_peek*.py
+scratch/
+_smoke.py
