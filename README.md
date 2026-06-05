@@ -88,5 +88,13 @@ Contraseñas por defecto en `.env.example` (cambiar en producción).
 - [x] **Fase 0** — Andamiaje (repo, Docker, BD, CI, auth, seed)
 - [x] **Fase 1** — Parsers España + Colombia con tests contra datos reales
 - [x] **Fase 1b** — Puente terceros NIF↔NIT
-- [ ] **Fase 2** — Homologación editable + cruce PYG por grupo×mes vs bosquejo
+- [x] **Fase 2** — Homologación (72 grupos) + motor de conciliación PYG por grupo×periodo
+      (decenas de grupos cuadran a <$1; ICBF/SENA → `parafiscal_co`)
+- [ ] Wiring API + frontend de los tableros Comparativa/Resumen
 - [ ] AR/AP por tercero · Excepciones · Anomalías v1 · Exportación Excel/PDF
+
+> **Nota de validación**: el bosquejo (#5) es una maqueta de formato; sus cifras no
+> reconcilian con el consolidado (#3) en Ene–Mar, así que la Fase 2 se valida por
+> consistencia interna y por el cuadre real entre los dos libros, no contra el bosquejo.
+> El balance de Colombia de Feb–Marzo viene combinado, por lo que el cruce opera con
+> periodos `2026-01` y `2026-02-03`.
