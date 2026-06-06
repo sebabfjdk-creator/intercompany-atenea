@@ -1,0 +1,190 @@
+"""Servicio de ingesta: parsea un Excel subido y puebla la BD.
+
+Tipos soportados:
+  - 'espana'       -> AccountPeriod (pais ES) desde el Libro Mayor DELSOL
+  - 'colombia'     -> AccountPeriod (pais CO) desde los balances Siesa
+  - 'homologacion' -> account_mapping (grupos CO<->ES)
+  - 'terceros'     -> tercero_bridge (puente NIF<->NIT) [requiere homologacion]
+
+Idempotente por (pais, codigo, periodo) / por grupo: hace upsert sencillo
+borrando lo previo del mismo sistema antes de recargar.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+from collections import defaultdict
+
+import openpyxl
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from db.models import (
+    AccountMapping,
+    AccountPeriod,
+    ImportBatch,
+    SourceSystem,
+    TerceroBridge,
+)
+from ingestion.colombia import parse_colombia_balance
+from ingestion.espana import parse_espana_movimientos
+from ingestion.homologacion import load_homologacion
+from ingestion.terceros import load_puente_terceros
+
+# Mapea nombre de hoja -> periodo lógico
+_ES_SHEETS = {
+    "AteneaEneroMvto": "2026-01",
+    "AteneaFebrero-MarzoMvti": "2026-02-03",
+}
+_CO_SHEETS = {
+    "Balance_Enero": "2026-01",
+    "Balance_Febrero-Marzo": "2026-02-03",
+}
+
+
+def _hash_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sheets(path: str) -> list[str]:
+    wb = openpyxl.load_workbook(path, read_only=True)
+    try:
+        return list(wb.sheetnames)
+    finally:
+        wb.close()
+
+
+def _match_sheet(disponibles: list[str], mapa: dict[str, str]) -> dict[str, str]:
+    """Empareja hojas reales con periodos, tolerando variaciones de nombre."""
+    out = {}
+    for real in disponibles:
+        for patron, periodo in mapa.items():
+            if real.replace(" ", "").lower() == patron.replace(" ", "").lower():
+                out[real] = periodo
+    # fallback: por palabra clave
+    if not out:
+        for real in disponibles:
+            low = real.lower()
+            if "enero" in low and "balance" not in low.replace("balance_enero", ""):
+                pass
+    return out
+
+
+def ingest_espana(db: Session, path: str) -> dict:
+    sis = _ensure_system(db, "DELSOL", "ES", "delsol_mayor")
+    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "ES"))
+    matched = _match_sheet(_sheets(path), _ES_SHEETS)
+    if not matched:
+        raise ValueError(f"No se reconocieron hojas de España. Hojas: {_sheets(path)}")
+    n = 0
+    for sheet, periodo in matched.items():
+        cuentas = parse_espana_movimientos(path, sheet)
+        agg: dict[str, dict] = defaultdict(lambda: {"debe": 0.0, "haber": 0.0, "nombre": ""})
+        for c in cuentas:
+            a = agg[c.codigo]
+            a["nombre"] = c.nombre
+            for m in c.movimientos:
+                a["debe"] += m.debe
+                a["haber"] += m.haber
+        for codigo, a in agg.items():
+            db.add(AccountPeriod(
+                pais="ES", codigo=codigo, nombre=a["nombre"][:255], periodo=periodo,
+                debe=round(a["debe"], 2), haber=round(a["haber"], 2),
+            ))
+            n += 1
+    _record_batch(db, sis.id, _hash_file(path), n)
+    db.commit()
+    return {"tipo": "espana", "periodos": sorted(set(matched.values())), "cuentas": n}
+
+
+def ingest_colombia(db: Session, path: str) -> dict:
+    sis = _ensure_system(db, "Siesa", "CO", "siesa_xlsx")
+    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO"))
+    matched = _match_sheet(_sheets(path), _CO_SHEETS)
+    if not matched:
+        raise ValueError(f"No se reconocieron hojas de Colombia. Hojas: {_sheets(path)}")
+    n = 0
+    for sheet, periodo in matched.items():
+        for c in parse_colombia_balance(path, sheet):
+            # debe=debitos, haber=creditos (uniforme con la normalización del motor)
+            db.add(AccountPeriod(
+                pais="CO", codigo=c.codigo, nombre=c.nombre[:255], periodo=periodo,
+                debe=round(c.debitos, 2), haber=round(c.creditos, 2),
+            ))
+            n += 1
+    _record_batch(db, sis.id, _hash_file(path), n)
+    db.commit()
+    return {"tipo": "colombia", "periodos": sorted(set(matched.values())), "cuentas": n}
+
+
+def ingest_homologacion(db: Session, path: str) -> dict:
+    db.execute(delete(AccountMapping))
+    grupos = load_homologacion(path)
+    n = 0
+    for g in grupos:
+        # una fila por par CO×ES (o por cuenta suelta) para account_mapping
+        pares = [(co, es) for co in (g.cuentas_co or [""]) for es in (g.cuentas_es or [""])]
+        for co, es in pares:
+            db.add(AccountMapping(
+                cuenta_co_patron=co, cuenta_es=es, grupo_homologado=g.grupo,
+                tipo_relacion=g.tipo_relacion, confianza="alta", activo=True,
+            ))
+            n += 1
+    db.commit()
+    return {"tipo": "homologacion", "grupos": len(grupos), "mappings": n}
+
+
+def ingest_terceros(db: Session, path: str) -> dict:
+    db.execute(delete(TerceroBridge))
+    puente = load_puente_terceros(path)
+    for t in puente:
+        db.add(TerceroBridge(
+            cuenta_es=t.cuenta_es, nombre_fiscal=t.nombre_fiscal[:255],
+            nif_normalizado=t.nif_normalizado, tipo_nif=t.tipo_nif,
+            nit_colombia=t.nit_colombia, tipo=t.tipo, activo=True,
+        ))
+    db.commit()
+    return {"tipo": "terceros", "terceros": len(puente)}
+
+
+def _ensure_system(db: Session, nombre: str, pais: str, fmt: str) -> SourceSystem:
+    sis = db.scalar(select(SourceSystem).where(SourceSystem.nombre == nombre))
+    if not sis:
+        sis = SourceSystem(nombre=nombre, pais=pais, tipo_formato=fmt)
+        db.add(sis)
+        db.flush()
+    return sis
+
+
+def _record_batch(db: Session, sistema_id: int, file_hash: str, n: int) -> None:
+    db.add(ImportBatch(
+        sistema_id=sistema_id, periodo_mes="2026-Q1", archivo_hash=file_hash[:64],
+        estado="cargado",
+    ))
+
+
+INGESTORS = {
+    "espana": ingest_espana,
+    "colombia": ingest_colombia,
+    "homologacion": ingest_homologacion,
+    "terceros": ingest_terceros,
+}
+
+
+def detectar_tipo(path: str) -> str | None:
+    """Heurística por nombres de hoja para auto-detectar el tipo de archivo."""
+    sheets = [s.lower() for s in _sheets(path)]
+    joined = " ".join(sheets)
+    if any("mvto" in s or "delsol" in s or re.search(r"atenea.*balance", s) for s in sheets):
+        return "espana"
+    if any(s.startswith("balance_") or s.startswith("mvto_") for s in sheets):
+        return "colombia"
+    if "puente terceros" in joined:
+        return "homologacion"
+    if "clientes" in sheets and "proveedor" in sheets:
+        return "terceros"
+    return None

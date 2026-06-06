@@ -75,6 +75,10 @@ def cruzar_pyg(
             agg[c.codigo] += valor_es_movs(c)
         es_idx[periodo] = dict(agg)
 
+    return _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct)
+
+
+def _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct) -> list[ResultadoConciliacion]:
     periodos = sorted(set(co_idx) & set(es_idx))
     resultados: list[ResultadoConciliacion] = []
     for g in grupos:
@@ -88,6 +92,35 @@ def cruzar_pyg(
                 diferencia=dif, pct_dif=pct, estado=estado,
             ))
     return resultados
+
+
+def valor_periodo(pais: str, codigo: str, debe: float, haber: float) -> float:
+    """Normaliza a naturaleza positiva: ingreso (CO clase 4 / ES clase 7) = haber - debe;
+    resto (gastos, etc.) = debe - haber."""
+    clase = codigo[:1]
+    ingreso = (pais == "CO" and clase == "4") or (pais == "ES" and clase == "7")
+    return round((haber - debe) if ingreso else (debe - haber), 2)
+
+
+def cruzar_pyg_periodos(
+    grupos: list[GrupoHomologado],
+    filas,  # iterable de objetos/tuplas con (pais, codigo, periodo, debe, haber)
+    tol_abs: float = 1000.0,
+    tol_pct: float = 0.005,
+) -> list[ResultadoConciliacion]:
+    """Variante que cruza desde filas AccountPeriod (BD)."""
+    from collections import defaultdict
+    co_idx: dict[str, dict[str, float]] = defaultdict(dict)
+    es_idx: dict[str, dict[str, float]] = defaultdict(dict)
+    for r in filas:
+        pais = r.pais if hasattr(r, "pais") else r[0]
+        codigo = r.codigo if hasattr(r, "codigo") else r[1]
+        periodo = r.periodo if hasattr(r, "periodo") else r[2]
+        debe = float(r.debe if hasattr(r, "debe") else r[3])
+        haber = float(r.haber if hasattr(r, "haber") else r[4])
+        v = valor_periodo(pais, codigo, debe, haber)
+        (co_idx if pais == "CO" else es_idx)[periodo][codigo] = v
+    return _cruzar(grupos, dict(co_idx), dict(es_idx), tol_abs, tol_pct)
 
 
 def causa_sugerida(r: ResultadoConciliacion) -> str | None:

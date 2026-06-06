@@ -227,3 +227,23 @@ class AuditLog(Base):
     valor_despues: Mapped[str | None] = mapped_column(Text, nullable=True)
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccountPeriod(Base):
+    """Cifras agregadas por cuenta × periodo, uniformes para CO y ES.
+    Alimenta el motor de conciliación PYG sin re-parsear Excel en cada consulta.
+    pais: 'CO' | 'ES'. periodo: 'YYYY-MM' o rango '2026-02-03'.
+    """
+    __tablename__ = "account_period"
+    __table_args__ = (
+        UniqueConstraint("pais", "codigo", "periodo", name="uq_acctperiod"),
+        Index("ix_acctperiod_periodo", "periodo"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pais: Mapped[str] = mapped_column(String(2), index=True)
+    codigo: Mapped[str] = mapped_column(String(40), index=True)
+    nombre: Mapped[str] = mapped_column(String(255), default="")
+    periodo: Mapped[str] = mapped_column(String(10))
+    debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
