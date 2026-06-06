@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,16 +22,30 @@ from db.base import get_db
 from db.models import User
 
 settings = get_settings()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+# Usamos la librería bcrypt directamente (passlib 1.7.4 es incompatible con
+# bcrypt>=4.x: falla al leer la versión y al inicializar el backend).
+# bcrypt solo considera los primeros 72 bytes y lanza ValueError si recibe más,
+# así que truncamos a 72 bytes de forma consistente en hash y verify (cubre, p.ej.,
+# un SEED_*_PASSWORD largo).
+_BCRYPT_MAX_BYTES = 72
+
+
+def _prepare_password(p: str) -> bytes:
+    """Codifica a UTF-8 y trunca a 72 bytes (bcrypt opera sobre bytes)."""
+    return (p or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
 
 
 def hash_password(p: str) -> str:
-    return pwd_context.hash(p)
+    return bcrypt.hashpw(_prepare_password(p), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(_prepare_password(plain), hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def create_access_token(sub: str, rol: str) -> str:
