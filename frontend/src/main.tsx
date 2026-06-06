@@ -4,12 +4,14 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import "./index.css";
 import Login from "./pages/Login";
 import Layout from "./pages/Layout";
+import Dashboard from "./pages/Dashboard";
 import Comparativa from "./pages/Comparativa";
 import Resumen from "./pages/Resumen";
 import Terceros from "./pages/Terceros";
 import Excepciones from "./pages/Excepciones";
 import Auditoria from "./pages/Auditoria";
 import Config from "./pages/Config";
+import Ingesta from "./pages/Ingesta";
 
 function requireAuth(element: React.ReactNode) {
   return localStorage.getItem("token") ? element : <Navigate to="/login" replace />;
@@ -21,11 +23,12 @@ const router = createBrowserRouter([
     path: "/",
     element: requireAuth(<Layout />),
     children: [
-      { index: true, element: <Navigate to="/comparativa" replace /> },
+      { index: true, element: <Dashboard /> },
       { path: "comparativa", element: <Comparativa /> },
       { path: "resumen", element: <Resumen /> },
       { path: "terceros", element: <Terceros /> },
       { path: "excepciones", element: <Excepciones /> },
+      { path: "ingesta", element: <Ingesta /> },
       { path: "auditoria", element: <Auditoria /> },
       { path: "config", element: <Config /> },
     ],

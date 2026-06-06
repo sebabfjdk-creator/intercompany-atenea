@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const baseURL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const PROD_API = "https://intercompany-atenea-production.up.railway.app";
+const baseURL = import.meta.env.VITE_API_URL ?? PROD_API;
 
 export const api = axios.create({ baseURL });
 
@@ -20,3 +21,5 @@ api.interceptors.response.use(
     return Promise.reject(err);
   },
 );
+
+export const API_BASE = baseURL;
