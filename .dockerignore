@@ -1,0 +1,29 @@
+# Mantener la imagen ligera y el build reproducible.
+# El Dockerfile raíz solo copia backend/, pero excluimos artefactos pesados.
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# No empaquetar el frontend ni datos/secretos en la imagen del backend
+frontend/
+data/
+*.xlsx
+*.xls
+
+# Git / CI / docs
+.git/
+.github/
+.gitignore
+.dockerignore
+*.md
+docker-compose.yml
+
+# Entorno y editores
+.env
+.env.*
+.vscode/
+.idea/
