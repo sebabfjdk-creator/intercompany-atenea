@@ -13,9 +13,11 @@ RUN npm run build
 
 # ---- serve ----
 FROM nginx:alpine
-# La imagen oficial hace envsubst de /etc/nginx/templates/*.template al arrancar,
-# sustituyendo ${PORT}. Railway inyecta PORT; 8080 es el fallback local.
 ENV PORT=8080
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
-EXPOSE 8080
+
+# Arranque EXPLÍCITO (no dependemos del entrypoint de la imagen):
+# sustituimos solo $PORT en la config y lanzamos nginx en foreground.
+# Si $PORT no estuviera definido, cae a 8080 (ENV de arriba).
+CMD ["/bin/sh","-c","envsubst '$PORT' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
