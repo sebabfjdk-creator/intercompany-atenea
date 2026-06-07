@@ -12,6 +12,7 @@ import Excepciones from "./pages/Excepciones";
 import Auditoria from "./pages/Auditoria";
 import Config from "./pages/Config";
 import Ingesta from "./pages/Ingesta";
+import ArAp from "./pages/ArAp";
 import Usuarios from "./pages/Usuarios";
 
 function requireAuth(element: React.ReactNode) {
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
       { path: "resumen", element: <Resumen /> },
       { path: "terceros", element: <Terceros /> },
       { path: "excepciones", element: <Excepciones /> },
+      { path: "ar-ap", element: <ArAp /> },
       { path: "ingesta", element: <Ingesta /> },
       { path: "auditoria", element: <Auditoria /> },
       { path: "usuarios", element: <Usuarios /> },

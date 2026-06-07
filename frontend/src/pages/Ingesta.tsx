@@ -72,6 +72,19 @@ export default function Ingesta() {
             ))}
           </div>
         </Card>
+        <Card title="Cuentas por Cobrar y Pagar (AR/AP)" className="mt-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Uploader tipo="ar-ap/colombia" label="Colombia AR/AP"
+              hint="Cartera/CXP Siesa (1305, 2805, 22xx)" disabled={false} onDone={est.reload} />
+            <Uploader tipo="ar-ap/espana" label="España AR/AP"
+              hint="Cartera/CXP DELSOL (430, 410)" disabled={esAdminCo} onDone={est.reload} />
+          </div>
+          <p className="text-xs text-slate-400 mt-3">
+            Puedes subir el mismo archivo (CarteraYPasivos) en ambos slots: cada uno toma sus hojas
+            (Atenea = España, Neuron = Colombia). Las cuentas amarillas (provisionales) no cruzan.
+          </p>
+        </Card>
+
         <p className="text-xs text-slate-400 mt-3">
           Los archivos no se almacenan: se parsean y se guardan solo las cifras agregadas por cuenta/periodo.
         </p>

@@ -6,6 +6,7 @@ const NAV = [
   { to: "/resumen", label: "Resumen" },
   { to: "/terceros", label: "Terceros (AR/AP)" },
   { to: "/excepciones", label: "Excepciones" },
+  { to: "/ar-ap", label: "AR/AP" },
   { to: "/ingesta", label: "Ingesta" },
   { to: "/auditoria", label: "Auditoría" },
   { to: "/usuarios", label: "Usuarios" },
