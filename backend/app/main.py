@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.routers import arap as arap_router
 from app.routers import auth as auth_router
 from app.routers import data as data_router
 from app.routers import health as health_router
@@ -32,6 +33,7 @@ app.include_router(auth_router.router)
 app.include_router(data_router.router)
 app.include_router(ingest_router.router)
 app.include_router(users_router.router)
+app.include_router(arap_router.router)
 
 
 @app.get("/")

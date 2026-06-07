@@ -1,0 +1,67 @@
+"""Tests del módulo AR/AP contra el archivo real CarteraYPasivos.xlsx."""
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.services import arap_service as svc
+from app.services import ingest as ingest_svc
+from db.base import Base
+from ingestion.arap import parse_arap_colombia, parse_arap_espana
+
+
+@pytest.fixture(scope="module")
+def db(tmp_path_factory, f_homologacion, f_cartera):
+    for f in (f_homologacion, f_cartera):
+        if not f.exists():
+            pytest.skip("faltan archivos de datos")
+    p = tmp_path_factory.mktemp("db") / "arap.sqlite"
+    engine = create_engine(f"sqlite:///{p}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    S = sessionmaker(bind=engine)
+    with S() as d:
+        ingest_svc.ingest_terceros(d, str(f_homologacion))  # puente NIF<->NIT
+        svc.ingest_espana(d, str(f_cartera))
+        svc.ingest_colombia(d, str(f_cartera))
+        yield d
+
+
+# --- parsers puros ---
+def test_parser_espana_provisionales(f_cartera):
+    if not f_cartera.exists():
+        pytest.skip("falta cartera")
+    es = parse_arap_espana(f_cartera, "CarteraAtenea")
+    assert len([t for t in es if t.es_provisional]) == 7
+    link = next((t for t in es if t.cuenta_es == "430.0.0.271"), None)
+    assert link and round(link.saldo, 2) == 501657.75
+
+
+def test_parser_colombia_error_1305(f_cartera):
+    if not f_cartera.exists():
+        pytest.skip("falta cartera")
+    co = parse_arap_colombia(f_cartera, "CarteraNeuron")
+    errores = [t for t in co if t.error_contabilizacion]
+    assert len(errores) >= 1
+    assert all(t.saldo_1305 < 0 for t in errores)
+
+
+# --- servicio / motor ---
+def test_estado_datos(db):
+    e = svc.estado_datos(db)
+    assert e["espana_terceros"] > 100
+    assert e["colombia_terceros"] > 100
+    assert e["espana_provisionales"] == 10  # 7 en AR (430.9.x/431.9.9.x) + 3 en AP (410.9.x)
+    assert e["listo"] is True
+
+
+def test_reconciliacion_y_estados(db):
+    r = svc.reconciliacion(db)
+    estados = {f["estado"] for f in r["filas"]}
+    assert "CONCILIADO" in estados or "DIFERENCIA" in estados
+    assert r["kpis"]["terceros"] > 0
+    for f in r["filas"]:
+        assert f["diferencia"] == round(f["saldo_co"] - f["saldo_es"], 2)
+
+
+def test_provisionales_y_errores(db):
+    assert len(svc.provisionales(db)) == 10  # AR + AP
+    assert len(svc.errores_contables(db)) >= 1

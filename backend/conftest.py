@@ -44,3 +44,8 @@ def f_terceros(data_dir) -> Path:
 @pytest.fixture(scope="session")
 def f_bosquejo(data_dir) -> Path:
     return data_dir / "bosquejo_pyg.xlsx"
+
+
+@pytest.fixture(scope="session")
+def f_cartera(data_dir) -> Path:
+    return data_dir / "cartera_pasivos.xlsx"

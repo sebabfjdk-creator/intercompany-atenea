@@ -247,3 +247,27 @@ class AccountPeriod(Base):
     periodo: Mapped[str] = mapped_column(String(10))
     debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
     haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+
+
+class ArApBalance(Base):
+    """Saldos por tercero para conciliación AR/AP (Cuentas por Cobrar y Pagar).
+
+    pais: CO|ES · tipo: AR|AP. Para ES, `nit` se resuelve vía tercero_bridge en la
+    ingesta (las cuentas provisionales amarillas quedan con nit='' y es_provisional).
+    Para CO se guardan los componentes 1305/2805 (o 22xx) y el saldo neto.
+    """
+    __tablename__ = "arap_balance"
+    __table_args__ = (Index("ix_arap_pais_tipo_nit", "pais", "tipo", "nit"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pais: Mapped[str] = mapped_column(String(2), index=True)
+    tipo: Mapped[str] = mapped_column(String(2))                # AR | AP
+    nit: Mapped[str] = mapped_column(String(40), default="", index=True)
+    cuenta: Mapped[str] = mapped_column(String(60), default="")  # cuenta_es o '1305/2805'
+    nombre: Mapped[str] = mapped_column(String(255), default="")
+    saldo: Mapped[float] = mapped_column(Numeric(20, 2), default=0)        # saldo neto
+    saldo_a: Mapped[float] = mapped_column(Numeric(20, 2), default=0)      # CO: 1305 ; ES: n/a
+    saldo_b: Mapped[float] = mapped_column(Numeric(20, 2), default=0)      # CO: 2805 ; ES: n/a
+    es_provisional: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_contab: Mapped[bool] = mapped_column(Boolean, default=False)
+    periodo: Mapped[str] = mapped_column(String(10), default="2026-Q1")
