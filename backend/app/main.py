@@ -9,6 +9,7 @@ from app.routers import auth as auth_router
 from app.routers import data as data_router
 from app.routers import health as health_router
 from app.routers import ingest as ingest_router
+from app.routers import users as users_router
 
 settings = get_settings()
 
@@ -30,6 +31,7 @@ app.include_router(health_router.router)
 app.include_router(auth_router.router)
 app.include_router(data_router.router)
 app.include_router(ingest_router.router)
+app.include_router(users_router.router)
 
 
 @app.get("/")

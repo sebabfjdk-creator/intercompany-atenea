@@ -51,6 +51,13 @@ def seed() -> None:
             os.getenv("SEED_ADMINCO_PASSWORD", "atenea-co"),
             "admin_co",
         )
+        _ensure_user(
+            db,
+            os.getenv("SEED_USER3_EMAIL", "financiero@atenea.com"),
+            "Financiero",
+            os.getenv("SEED_USER3_PASSWORD", "atenea-fin"),
+            "admin",
+        )
         _ensure_source(db, "Siesa", "CO", "siesa_xlsx")
         _ensure_source(db, "DELSOL", "ES", "delsol_mayor")
         db.commit()

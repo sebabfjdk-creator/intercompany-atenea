@@ -12,6 +12,7 @@ import Excepciones from "./pages/Excepciones";
 import Auditoria from "./pages/Auditoria";
 import Config from "./pages/Config";
 import Ingesta from "./pages/Ingesta";
+import Usuarios from "./pages/Usuarios";
 
 function requireAuth(element: React.ReactNode) {
   return localStorage.getItem("token") ? element : <Navigate to="/login" replace />;
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: "excepciones", element: <Excepciones /> },
       { path: "ingesta", element: <Ingesta /> },
       { path: "auditoria", element: <Auditoria /> },
+      { path: "usuarios", element: <Usuarios /> },
       { path: "config", element: <Config /> },
     ],
   },

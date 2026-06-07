@@ -80,6 +80,27 @@ def test_terceros_y_excepciones(client):
     assert any(x["causa"] == "parafiscal_co" for x in e)
 
 
+def test_users_crud(client):
+    # listar (admin)
+    r = client.get("/api/users")
+    assert r.status_code == 200
+    assert any(u["email"] == "admin@atenea.com" for u in r.json())
+    # crear
+    r = client.post("/api/users", json={"email": "nuevo@atenea.com", "nombre": "Nuevo", "password": "secreta1", "rol": "admin_co"})
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    # el nuevo usuario puede loguear
+    r = client.post("/api/auth/login", data={"username": "nuevo@atenea.com", "password": "secreta1"},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 200
+    # email duplicado -> 409
+    r = client.post("/api/users", json={"email": "nuevo@atenea.com", "nombre": "X", "password": "secreta1", "rol": "admin"})
+    assert r.status_code == 409
+    # cambiar contraseña de otro (admin) sin 'actual'
+    r = client.patch(f"/api/users/{uid}/password", json={"nueva": "otra1234"})
+    assert r.status_code == 200
+
+
 def test_role_admin_co_no_sube_espana(client):
     token_co = create_access_token("colombia@atenea.com", "admin_co")
     r = client.post("/api/ingest/espana", headers={"Authorization": f"Bearer {token_co}"},

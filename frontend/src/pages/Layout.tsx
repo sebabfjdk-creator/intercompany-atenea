@@ -8,6 +8,7 @@ const NAV = [
   { to: "/excepciones", label: "Excepciones" },
   { to: "/ingesta", label: "Ingesta" },
   { to: "/auditoria", label: "Auditoría" },
+  { to: "/usuarios", label: "Usuarios" },
   { to: "/config", label: "Configuración" },
 ];
 

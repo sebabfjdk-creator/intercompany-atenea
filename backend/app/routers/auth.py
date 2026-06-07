@@ -22,6 +22,7 @@ class TokenOut(BaseModel):
 
 
 class MeOut(BaseModel):
+    id: int
     email: str
     nombre: str
     rol: str
@@ -38,4 +39,4 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 
 @router.get("/me", response_model=MeOut)
 def me(user: User = Depends(get_current_user)):
-    return MeOut(email=user.email, nombre=user.nombre, rol=user.rol)
+    return MeOut(id=user.id, email=user.email, nombre=user.nombre, rol=user.rol)
