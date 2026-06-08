@@ -271,3 +271,20 @@ class ArApBalance(Base):
     es_provisional: Mapped[bool] = mapped_column(Boolean, default=False)
     error_contab: Mapped[bool] = mapped_column(Boolean, default=False)
     periodo: Mapped[str] = mapped_column(String(10), default="2026-Q1")
+
+
+class ArApMovimiento(Base):
+    """Movimientos individuales AR/AP por tercero (para detalle 'Ver más' y filtros de fecha)."""
+    __tablename__ = "arap_movimiento"
+    __table_args__ = (Index("ix_arapmov_pais_nit", "pais", "nit"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pais: Mapped[str] = mapped_column(String(2), index=True)
+    tipo: Mapped[str] = mapped_column(String(2))                # AR | AP
+    nit: Mapped[str] = mapped_column(String(40), default="", index=True)
+    cuenta: Mapped[str] = mapped_column(String(40), default="")
+    fecha: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    concepto: Mapped[str] = mapped_column(Text, default="")
+    debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    saldo: Mapped[float] = mapped_column(Numeric(20, 2), default=0)

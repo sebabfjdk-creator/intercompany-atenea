@@ -66,8 +66,15 @@ def estado(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
 
 @router.get("/ar-ap/comparativa")
 def comparativa(tipo: str | None = Query(None, pattern="^(AR|AP)$"),
+                desde: str | None = Query(None), hasta: str | None = Query(None),
                 db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return svc.reconciliacion(db, tipo)
+    return svc.reconciliacion(db, tipo, desde, hasta)
+
+
+@router.get("/ar-ap/movimientos-tercero")
+def movimientos_tercero(nit: str = Query(...), desde: str | None = Query(None), hasta: str | None = Query(None),
+                        db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return svc.movimientos_tercero(db, nit, desde, hasta)
 
 
 @router.get("/ar-ap/excepciones")

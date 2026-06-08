@@ -16,6 +16,7 @@ Saldo negativo en 1305 -> error_contabilizacion (debería estar en 2805).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import openpyxl
 
@@ -27,11 +28,22 @@ _AMARILLO = "FFFFFF00"
 
 
 @dataclass
+class MovArAp:
+    cuenta: str
+    fecha: object  # datetime | None
+    concepto: str
+    debe: float
+    haber: float
+    saldo: float
+
+
+@dataclass
 class SaldoTerceroES:
     cuenta_es: str
     nombre: str
     saldo: float
     es_provisional: bool
+    movimientos: list = None  # list[MovArAp] del bloque (detalle)
 
 
 @dataclass
@@ -72,12 +84,22 @@ def parse_arap_espana(path, sheet: str) -> list[SaldoTerceroES]:
             if cod:
                 nombre = str(c0.value).strip()[len(cod):].strip()
                 actual = SaldoTerceroES(cuenta_es=cod, nombre=nombre, saldo=0.0,
-                                        es_provisional=_cell_amarilla(c0))
+                                        es_provisional=_cell_amarilla(c0), movimientos=[])
                 out.append(actual)
                 continue
             docum = str(row[_ES_DOCUM].value).strip().lower() if row[_ES_DOCUM].value is not None else ""
             if docum == "total:" and actual is not None:
                 actual.saldo = parse_es_number(row[_ES_SALDO].value)
+                continue
+            # fila de movimiento: fecha en col0
+            if actual is not None and isinstance(c0.value, datetime):
+                actual.movimientos.append(MovArAp(
+                    cuenta=actual.cuenta_es, fecha=c0.value,
+                    concepto=str(row[4].value).strip() if row[4].value is not None else "",
+                    debe=parse_es_number(row[_ES_DEBE].value),
+                    haber=parse_es_number(row[_ES_HABER].value),
+                    saldo=parse_es_number(row[_ES_SALDO].value),
+                ))
         return out
     finally:
         wb.close()
@@ -113,5 +135,33 @@ def parse_arap_colombia(path, sheet: str) -> list[SaldoTerceroCO]:
             elif cuenta.startswith("22"):
                 t.saldo_22xx = round(t.saldo_22xx + saldo, 2)
         return list(agg.values())
+    finally:
+        wb.close()
+
+
+def parse_arap_colombia_movimientos(path, sheet: str) -> list[tuple[str, MovArAp]]:
+    """Devuelve (nit, MovArAp) por cada fila de detalle (con Referencia)."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[sheet]
+        c_cta, c_ncta, c_terc, c_ref, c_fec, c_deb, c_cred, c_saldo = 0, 1, 2, 4, 5, 8, 9, 10
+        out: list[tuple[str, MovArAp]] = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            nit = row[c_terc] if c_terc < len(row) else None
+            ref = row[c_ref] if c_ref < len(row) else None
+            if nit is None or str(nit).strip() == "":
+                continue
+            if ref is None or str(ref).strip() == "":
+                continue  # solo filas de detalle (con referencia)
+            fec = row[c_fec] if c_fec < len(row) else None
+            out.append((str(nit).strip(), MovArAp(
+                cuenta=str(row[c_cta]).strip() if row[c_cta] is not None else "",
+                fecha=fec if isinstance(fec, datetime) else None,
+                concepto=(str(row[c_ncta]).strip() if row[c_ncta] else "") + (f" · {str(ref).strip()}" if ref else ""),
+                debe=parse_es_number(row[c_deb] if c_deb < len(row) else 0),
+                haber=parse_es_number(row[c_cred] if c_cred < len(row) else 0),
+                saldo=parse_es_number(row[c_saldo] if c_saldo < len(row) else 0),
+            )))
+        return out
     finally:
         wb.close()

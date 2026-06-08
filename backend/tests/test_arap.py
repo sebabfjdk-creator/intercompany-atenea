@@ -65,3 +65,23 @@ def test_reconciliacion_y_estados(db):
 def test_provisionales_y_errores(db):
     assert len(svc.provisionales(db)) == 10  # AR + AP
     assert len(svc.errores_contables(db)) >= 1
+
+
+def test_movimientos_y_totales(db):
+    r = svc.reconciliacion(db)
+    # §4 totales por categoría
+    assert set(r["totales"]) == {"CLIENTES", "PROVEEDORES", "TOTAL"}
+    # §2 cada fila trae débitos/créditos del periodo y categoría
+    assert all("debitos_mes" in f and f["categoria"] in ("CLIENTE", "PROVEEDOR") for f in r["filas"])
+    # §5 movimientos por tercero: tomar uno con match (tiene CO y ES)
+    con_match = next((f for f in r["filas"] if f["estado"] in ("CONCILIADO", "DIFERENCIA") and f["nit"]), None)
+    assert con_match, "no hay tercero con match"
+    det = svc.movimientos_tercero(db, con_match["nit"])
+    assert "resumen" in det and "movimientos_co" in det and "movimientos_es" in det
+    assert det["movimientos_co"] or det["movimientos_es"]
+
+
+def test_filtro_fecha(db):
+    # rango imposible -> sin débitos
+    r = svc.reconciliacion(db, desde="2030-01-01", hasta="2030-12-31")
+    assert r["totales"]["TOTAL"]["debitos"] == 0

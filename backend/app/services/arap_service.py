@@ -11,13 +11,18 @@ Estados de conciliación:
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from db.models import ArApBalance, TerceroBridge
-from ingestion.arap import parse_arap_colombia, parse_arap_espana
+from db.models import ArApBalance, ArApMovimiento, TerceroBridge
+from ingestion.arap import (
+    parse_arap_colombia,
+    parse_arap_colombia_movimientos,
+    parse_arap_espana,
+)
 
 settings = get_settings()
 
@@ -51,6 +56,7 @@ def ingest_espana(db: Session, path: str) -> dict:
     nombres = {b.cuenta_es: b.nombre_fiscal for b in db.scalars(select(TerceroBridge)).all() if b.cuenta_es}
 
     db.execute(delete(ArApBalance).where(ArApBalance.pais == "ES"))
+    db.execute(delete(ArApMovimiento).where(ArApMovimiento.pais == "ES"))
     resumen = {}
     for sheet, tipo in [(ar_sheet, "AR"), (ap_sheet, "AP")]:
         if not sheet:
@@ -69,6 +75,10 @@ def ingest_espana(db: Session, path: str) -> dict:
             a["nombre"] = nombres.get(t.cuenta_es) or t.nombre
             a["nit"] = nit
             a["cuenta"] = t.cuenta_es
+            for m in (t.movimientos or []):
+                db.add(ArApMovimiento(pais="ES", tipo=tipo, nit=nit, cuenta=t.cuenta_es,
+                                      fecha=m.fecha, concepto=str(m.concepto)[:500],
+                                      debe=round(m.debe, 2), haber=round(m.haber, 2), saldo=round(m.saldo, 2)))
         for key, a in agg.items():
             db.add(ArApBalance(pais="ES", tipo=tipo, nit=a.get("nit", ""), cuenta=a["cuenta"],
                                nombre=a["nombre"][:255], saldo=a["saldo"]))
@@ -85,21 +95,26 @@ def ingest_colombia(db: Session, path: str) -> dict:
         raise ValueError(f"No se hallaron hojas AR/AP de Colombia. Hojas: {sheets}")
 
     db.execute(delete(ArApBalance).where(ArApBalance.pais == "CO"))
+    db.execute(delete(ArApMovimiento).where(ArApMovimiento.pais == "CO"))
     resumen = {}
-    if ar_sheet:
-        co = parse_arap_colombia(path, ar_sheet)
+    for sheet, tipo in [(ar_sheet, "AR"), (ap_sheet, "AP")]:
+        if not sheet:
+            continue
+        co = parse_arap_colombia(path, sheet)
         for t in co:
-            db.add(ArApBalance(pais="CO", tipo="AR", nit=t.nit, cuenta="1305/2805",
-                               nombre=t.nombre[:255], saldo=round(t.saldo_1305 + t.saldo_2805, 2),
-                               saldo_a=t.saldo_1305, saldo_b=t.saldo_2805,
-                               error_contab=t.error_contabilizacion))
-        resumen["AR"] = len(co)
-    if ap_sheet:
-        cap = parse_arap_colombia(path, ap_sheet)
-        for t in cap:
-            db.add(ArApBalance(pais="CO", tipo="AP", nit=t.nit, cuenta="22xx",
-                               nombre=t.nombre[:255], saldo=round(t.saldo_22xx, 2)))
-        resumen["AP"] = len(cap)
+            if tipo == "AR":
+                db.add(ArApBalance(pais="CO", tipo="AR", nit=t.nit, cuenta="1305/2805",
+                                   nombre=t.nombre[:255], saldo=round(t.saldo_1305 + t.saldo_2805, 2),
+                                   saldo_a=t.saldo_1305, saldo_b=t.saldo_2805,
+                                   error_contab=t.error_contabilizacion))
+            else:
+                db.add(ArApBalance(pais="CO", tipo="AP", nit=t.nit, cuenta="22xx",
+                                   nombre=t.nombre[:255], saldo=round(t.saldo_22xx, 2)))
+        for nit, m in parse_arap_colombia_movimientos(path, sheet):
+            db.add(ArApMovimiento(pais="CO", tipo=tipo, nit=nit, cuenta=m.cuenta,
+                                  fecha=m.fecha, concepto=str(m.concepto)[:500],
+                                  debe=round(m.debe, 2), haber=round(m.haber, 2), saldo=round(m.saldo, 2)))
+        resumen[tipo] = len(co)
     db.commit()
     return {"tipo": "ar-ap/colombia", "ar_terceros": resumen.get("AR", 0), "ap_terceros": resumen.get("AP", 0)}
 
@@ -112,8 +127,35 @@ def _estado(co: float, es: float, hay_co: bool, hay_es: bool, error_co: bool, um
     return "CONCILIADO" if abs(round(co - es, 2)) <= umbral else "DIFERENCIA"
 
 
-def reconciliacion(db: Session, tipo: str | None = None) -> dict:
+def _parse_fecha(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s)[:19])
+    except ValueError:
+        return None
+
+
+def _sumas_mov(db: Session, desde=None, hasta=None) -> dict:
+    """{(pais,tipo,nit): (debe, haber)} de movimientos en el rango [desde,hasta]."""
+    q = select(ArApMovimiento.pais, ArApMovimiento.tipo, ArApMovimiento.nit,
+               func.coalesce(func.sum(ArApMovimiento.debe), 0),
+               func.coalesce(func.sum(ArApMovimiento.haber), 0))
+    d, h = _parse_fecha(desde), _parse_fecha(hasta)
+    if d is not None:
+        q = q.where(ArApMovimiento.fecha >= d)
+    if h is not None:
+        q = q.where(ArApMovimiento.fecha <= h)
+    q = q.group_by(ArApMovimiento.pais, ArApMovimiento.tipo, ArApMovimiento.nit)
+    out = {}
+    for pais, tipo, nit, deb, hab in db.execute(q):
+        out[(pais, tipo, nit)] = (float(deb), float(hab))
+    return out
+
+
+def reconciliacion(db: Session, tipo: str | None = None, desde=None, hasta=None) -> dict:
     umbral = settings.tolerancia_abs_cop
+    sumas = _sumas_mov(db, desde, hasta)
     rows = db.scalars(select(ArApBalance).where(ArApBalance.es_provisional.is_(False))).all()
     # indexar por (tipo, nit)
     co_idx: dict[tuple, ArApBalance] = {}
@@ -136,15 +178,29 @@ def reconciliacion(db: Session, tipo: str | None = None) -> dict:
         saldo_es = float(e.saldo) if e else 0.0
         error_co = bool(c.error_contab) if c else False
         estado = _estado(saldo_co, saldo_es, c is not None, e is not None, error_co, umbral)
+        nit_real = nit if not str(nit).startswith("ES:") else ""
+        co_deb, co_hab = sumas.get(("CO", tp, nit_real), (0.0, 0.0)) if nit_real else (0.0, 0.0)
+        es_deb, es_hab = sumas.get(("ES", tp, nit_real), (0.0, 0.0)) if nit_real else (0.0, 0.0)
         out.append({
-            "tipo": tp, "nit": nit if not str(nit).startswith("ES:") else "",
+            "tipo": tp, "categoria": "CLIENTE" if tp == "AR" else "PROVEEDOR",
+            "nit": nit_real,
             "nombre": (c.nombre if c else None) or (e.nombre if e else ""),
             "saldo_co": round(saldo_co, 2), "saldo_es": round(saldo_es, 2),
             "saldo_1305": float(c.saldo_a) if c else None, "saldo_2805": float(c.saldo_b) if c else None,
+            "debitos_mes": round(co_deb + es_deb, 2), "creditos_mes": round(co_hab + es_hab, 2),
             "diferencia": round(saldo_co - saldo_es, 2),
             "estado": estado, "error_contab": error_co,
         })
     out.sort(key=lambda x: abs(x["diferencia"]), reverse=True)
+
+    def _tot(rows):
+        return {
+            "debitos": round(sum(x["debitos_mes"] for x in rows), 2),
+            "creditos": round(sum(x["creditos_mes"] for x in rows), 2),
+            "saldo_neto": round(sum(x["saldo_co"] - x["saldo_es"] for x in rows), 2),
+        }
+    clientes = [x for x in out if x["tipo"] == "AR"]
+    proveedores = [x for x in out if x["tipo"] == "AP"]
     kpis = {
         "terceros": len(out),
         "conciliados": sum(1 for x in out if x["estado"] == "CONCILIADO"),
@@ -155,7 +211,46 @@ def reconciliacion(db: Session, tipo: str | None = None) -> dict:
         "sum_es": round(sum(x["saldo_es"] for x in out), 2),
         "sum_dif": round(sum(x["diferencia"] for x in out), 2),
     }
-    return {"filas": out, "kpis": kpis}
+    totales = {"CLIENTES": _tot(clientes), "PROVEEDORES": _tot(proveedores), "TOTAL": _tot(out)}
+    return {"filas": out, "kpis": kpis, "totales": totales}
+
+
+def movimientos_tercero(db: Session, nit: str, desde=None, hasta=None) -> dict:
+    """Movimientos CO y ES de un tercero, con resumen de conciliación y alertas."""
+    q = select(ArApMovimiento).where(ArApMovimiento.nit == nit)
+    d, h = _parse_fecha(desde), _parse_fecha(hasta)
+    if d is not None:
+        q = q.where(ArApMovimiento.fecha >= d)
+    if h is not None:
+        q = q.where(ArApMovimiento.fecha <= h)
+    movs = db.scalars(q.order_by(ArApMovimiento.fecha)).all()
+
+    def serial(m):
+        return {"fecha": m.fecha.isoformat() if m.fecha else None, "cuenta": m.cuenta,
+                "concepto": m.concepto, "debe": float(m.debe), "haber": float(m.haber), "saldo": float(m.saldo)}
+    co = [serial(m) for m in movs if m.pais == "CO"]
+    es = [serial(m) for m in movs if m.pais == "ES"]
+
+    bal = db.scalars(select(ArApBalance).where(ArApBalance.nit == nit)).all()
+    co_bal = next((b for b in bal if b.pais == "CO"), None)
+    es_saldo = round(sum(float(b.saldo) for b in bal if b.pais == "ES"), 2)
+    saldo_1305 = float(co_bal.saldo_a) if co_bal else 0.0
+    saldo_2805 = float(co_bal.saldo_b) if co_bal else 0.0
+    saldo_co = round(saldo_1305 + saldo_2805, 2)
+    nombre = (co_bal.nombre if co_bal else None) or (bal[0].nombre if bal else "")
+
+    alertas = []
+    if co_bal and co_bal.error_contab:
+        alertas.append({"tipo": "error", "msg": "Saldo negativo detectado en cuenta 1305 — posible error de contabilización."})
+    if saldo_2805 < 0:
+        alertas.append({"tipo": "info", "msg": "Saldo a favor del cliente (2805) incluido en el neto de Colombia."})
+    return {
+        "nit": nit, "nombre": nombre,
+        "movimientos_co": co, "movimientos_es": es,
+        "resumen": {"saldo_1305": saldo_1305, "saldo_2805": saldo_2805, "saldo_co": saldo_co,
+                    "saldo_es": es_saldo, "diferencia": round(saldo_co - es_saldo, 2)},
+        "alertas": alertas,
+    }
 
 
 def excepciones(db: Session) -> list[dict]:
