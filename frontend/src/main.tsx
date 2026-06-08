@@ -9,6 +9,7 @@ import Comparativa from "./pages/Comparativa";
 import Resumen from "./pages/Resumen";
 import Terceros from "./pages/Terceros";
 import Excepciones from "./pages/Excepciones";
+import Anomalias from "./pages/Anomalias";
 import Auditoria from "./pages/Auditoria";
 import Config from "./pages/Config";
 import Parametros from "./pages/Parametros";
@@ -31,6 +32,7 @@ const router = createBrowserRouter([
       { path: "resumen", element: <Resumen /> },
       { path: "terceros", element: <Terceros /> },
       { path: "excepciones", element: <Excepciones /> },
+      { path: "anomalias", element: <Anomalias /> },
       { path: "ar-ap", element: <ArAp /> },
       { path: "ingesta", element: <Ingesta /> },
       { path: "auditoria", element: <Auditoria /> },

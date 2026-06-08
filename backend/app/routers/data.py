@@ -115,6 +115,45 @@ def auditoria(db: Session = Depends(get_db), _: User = Depends(get_current_user)
     return queries.auditoria(db)
 
 
+@router.get("/anomalias")
+def anomalias(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return queries.anomalias(db)
+
+
+@router.get("/resumen/export")
+def export_resumen(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    import openpyxl
+    data = queries.resumen(db)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Resumen"
+    ws.append(["Rubro", "Grupos", "CO", "ES", "Diferencia"])
+    for r in data["rubros"]:
+        ws.append([r["tipo"], r["grupos"], r["co"], r["es"], r["dif"]])
+    return _xlsx_response(wb, "resumen.xlsx")
+
+
+@router.get("/excepciones/export")
+def export_excepciones(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    import openpyxl
+    data = queries.excepciones(db)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Excepciones"
+    ws.append(["Grupo", "Tipo", "Periodo", "CO", "ES", "Diferencia", "%", "Causa"])
+    for e in data:
+        ws.append([e["grupo"], e["tipo"], e["periodo"], e["total_co"], e["total_es"],
+                   e["diferencia"], e["pct"], e["causa"] or ""])
+    return _xlsx_response(wb, "excepciones.xlsx")
+
+
+@router.get("/terceros/export")
+def export_terceros(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    import openpyxl
+    data = queries.terceros(db)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Terceros"
+    ws.append(["Cuenta ES", "Nombre fiscal", "NIF norm.", "NIT Colombia", "Tipo"])
+    for t in data["items"]:
+        ws.append([t["cuenta_es"], t["nombre_fiscal"], t["nif_normalizado"], t["nit_colombia"], t["tipo"]])
+    return _xlsx_response(wb, "terceros.xlsx")
+
+
 # ---------- Configuración editable (homologación + tolerancias) ----------
 @router.put("/config/homologacion")
 def guardar_homologacion(body: HomologacionIn, db: Session = Depends(get_db), user: User = Depends(require_editor)):

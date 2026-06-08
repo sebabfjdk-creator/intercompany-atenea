@@ -181,6 +181,14 @@ def test_config_export(client):
     assert r.content[:2] == b"PK"  # xlsx es un zip
 
 
+def test_anomalias(client):
+    r = client.get("/api/anomalias")
+    assert r.status_code == 200
+    d = r.json()
+    assert set(d) >= {"sin_homologar", "grupos_atipicos", "kpis"}
+    assert isinstance(d["sin_homologar"], list) and isinstance(d["grupos_atipicos"], list)
+
+
 def test_exports_excel(client):
     for url in ("/api/comparativa/export", "/api/ar-ap/export"):
         r = client.get(url)

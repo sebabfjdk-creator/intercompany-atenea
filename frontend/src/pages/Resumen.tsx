@@ -1,4 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
 import { fmtCOP } from "../lib/format";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
@@ -12,7 +13,8 @@ export default function Resumen() {
 
   return (
     <div>
-      <PageHeader title="Resumen por gran rubro" subtitle="Totales Colombia vs España y diferencias por tipo" />
+      <PageHeader title="Resumen por gran rubro" subtitle="Totales Colombia vs España y diferencias por tipo"
+        action={<button onClick={() => descargarArchivo("/api/resumen/export", "resumen.xlsx")} className="px-3 py-1.5 text-sm border rounded text-slate-600">⬇️ Excel</button>} />
       <DataState loading={loading} error={error} empty={empty} onRetry={reload}>
         {data && (
           <>

@@ -6,6 +6,7 @@ const TOP = [
   { to: "/comparativa", label: "Comparativa" },
   { to: "/resumen", label: "Resumen" },
   { to: "/excepciones", label: "Excepciones" },
+  { to: "/anomalias", label: "Anomalías" },
   { to: "/ar-ap", label: "AR/AP" },
 ];
 

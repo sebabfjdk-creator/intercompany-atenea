@@ -104,6 +104,81 @@ def homologacion(db: Session) -> dict:
     return config_service.get_homologacion(db)
 
 
+def _codigos_homologados(db: Session):
+    co, es = set(), set()
+    for r in db.scalars(select(AccountMapping).where(AccountMapping.activo.is_(True))).all():
+        if r.cuenta_co_patron:
+            co.add(r.cuenta_co_patron)
+        if r.cuenta_es:
+            es.add(r.cuenta_es)
+    return co, es
+
+
+def _cubierto(code: str, mapped: set[str]) -> bool:
+    for m in mapped:
+        mm = m[:-1] if (m and m[-1] in "xX*") else m
+        if not mm:
+            continue
+        if code == mm or code.startswith(mm) or mm.startswith(code):
+            return True
+    return False
+
+
+def anomalias(db: Session, z_umbral: float = 2.0) -> dict:
+    """Anomalías v1: cuentas PYG con movimiento sin homologar + grupos con diferencia
+    atípica (z-score transversal sobre |diferencia|). La z-score temporal por cuenta
+    se activa automáticamente cuando haya >=3 periodos."""
+    import statistics
+
+    from domain.reconciliacion import valor_periodo
+
+    co_map, es_map = _codigos_homologados(db)
+    filas = db.scalars(select(AccountPeriod)).all()
+    agg: dict[tuple, dict] = defaultdict(lambda: {"valor": 0.0, "nombre": "", "serie": {}})
+    for f in filas:
+        a = agg[(f.pais, f.codigo)]
+        v = valor_periodo(f.pais, f.codigo, float(f.debe), float(f.haber))
+        a["valor"] += v
+        a["serie"][f.periodo] = v
+        if f.nombre:
+            a["nombre"] = f.nombre
+
+    # 1) cuentas PYG (CO 4/5, ES 6/7) con movimiento, no cubiertas por la homologación
+    sin_homologar = []
+    for (pais, codigo), a in agg.items():
+        clase = codigo[:1]
+        es_pyg = (pais == "CO" and clase in ("4", "5")) or (pais == "ES" and clase in ("6", "7"))
+        if not es_pyg or abs(a["valor"]) < 1:
+            continue
+        if not _cubierto(codigo, co_map if pais == "CO" else es_map):
+            sin_homologar.append({"pais": pais, "codigo": codigo, "nombre": a["nombre"], "valor": round(a["valor"], 2)})
+    sin_homologar.sort(key=lambda x: abs(x["valor"]), reverse=True)
+
+    # 2) grupos con diferencia atípica (z-score transversal)
+    comp = comparativa(db)
+    difs = [abs(f["total_dif"]) for f in comp["filas"]]
+    grupos_atipicos = []
+    if len(difs) >= 3:
+        mu = statistics.mean(difs)
+        sd = statistics.pstdev(difs) or 1.0
+        for f in comp["filas"]:
+            z = (abs(f["total_dif"]) - mu) / sd
+            if z >= z_umbral and abs(f["total_dif"]) > 1:
+                grupos_atipicos.append({"grupo": f["grupo"], "tipo": f["tipo"],
+                                        "diferencia": f["total_dif"], "z": round(z, 2)})
+    grupos_atipicos.sort(key=lambda x: x["z"], reverse=True)
+
+    periodos = sorted({f.periodo for f in filas})
+    return {
+        "sin_homologar": sin_homologar,
+        "grupos_atipicos": grupos_atipicos,
+        "periodos": periodos,
+        "nota_zscore": ("z-score transversal sobre grupos" if len(periodos) < 3
+                        else "z-score temporal disponible"),
+        "kpis": {"sin_homologar": len(sin_homologar), "grupos_atipicos": len(grupos_atipicos)},
+    }
+
+
 def movimientos_cuenta(db: Session, pais: str, cuenta: str, periodo: str | None = None) -> dict:
     """Transacciones individuales de una cuenta (trazabilidad Grupo→Cuenta→Transacción).
     Match por prefijo: cubre cuentas jerárquicas CO (510570 -> 51057001) y wildcard ES."""

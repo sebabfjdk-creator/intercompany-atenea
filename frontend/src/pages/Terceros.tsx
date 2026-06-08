@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
 
@@ -23,7 +24,8 @@ export default function Terceros() {
 
   return (
     <div>
-      <PageHeader title="Terceros (AR/AP)" subtitle="Puente NIF (España) ↔ NIT (Colombia)" />
+      <PageHeader title="Terceros (AR/AP)" subtitle="Puente NIF (España) ↔ NIT (Colombia)"
+        action={<button onClick={() => descargarArchivo("/api/terceros/export", "terceros.xlsx")} className="px-3 py-1.5 text-sm border rounded text-slate-600">⬇️ Excel</button>} />
       <DataState loading={loading} error={error} empty={empty} onRetry={reload}>
         {data && (
           <>
