@@ -79,6 +79,22 @@ def test_movimientos_y_totales(db):
     det = svc.movimientos_tercero(db, con_match["nit"])
     assert "resumen" in det and "movimientos_co" in det and "movimientos_es" in det
     assert det["movimientos_co"] or det["movimientos_es"]
+    # consistencia interna del resumen (detalle por NIT, agrega AR+AP)
+    rr = det["resumen"]
+    assert rr["diferencia"] == round(rr["saldo_co"] - rr["saldo_es"], 2)
+
+
+def test_resumen_proveedor_usa_22xx(db):
+    # Regresión: para un proveedor PURO (solo AP, sin AR) el saldo_co del detalle
+    # debe venir de 22xx (no quedarse en 0 por usar solo 1305/2805).
+    r = svc.reconciliacion(db)
+    nits_ar = {f["nit"] for f in r["filas"] if f["tipo"] == "AR" and f["nit"]}
+    prov = next((f for f in r["filas"]
+                 if f["tipo"] == "AP" and f["nit"] and f["nit"] not in nits_ar and abs(f["saldo_co"]) > 1), None)
+    if prov:
+        det = svc.movimientos_tercero(db, prov["nit"])
+        assert det["resumen"]["saldo_co"] == prov["saldo_co"]
+        assert det["resumen"]["saldo_co"] != 0
 
 
 def test_filtro_fecha(db):

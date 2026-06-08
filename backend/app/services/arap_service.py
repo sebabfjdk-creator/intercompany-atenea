@@ -232,15 +232,16 @@ def movimientos_tercero(db: Session, nit: str, desde=None, hasta=None) -> dict:
     es = [serial(m) for m in movs if m.pais == "ES"]
 
     bal = db.scalars(select(ArApBalance).where(ArApBalance.nit == nit)).all()
-    co_bal = next((b for b in bal if b.pais == "CO"), None)
+    co_rows = [b for b in bal if b.pais == "CO"]
+    # saldo neto CO = suma de saldos CO (AR: 1305+2805 ; AP: 22xx)
+    saldo_co = round(sum(float(b.saldo) for b in co_rows), 2)
+    saldo_1305 = round(sum(float(b.saldo_a) for b in co_rows), 2)   # solo AR aporta
+    saldo_2805 = round(sum(float(b.saldo_b) for b in co_rows), 2)
     es_saldo = round(sum(float(b.saldo) for b in bal if b.pais == "ES"), 2)
-    saldo_1305 = float(co_bal.saldo_a) if co_bal else 0.0
-    saldo_2805 = float(co_bal.saldo_b) if co_bal else 0.0
-    saldo_co = round(saldo_1305 + saldo_2805, 2)
-    nombre = (co_bal.nombre if co_bal else None) or (bal[0].nombre if bal else "")
+    nombre = (co_rows[0].nombre if co_rows else None) or (bal[0].nombre if bal else "")
 
     alertas = []
-    if co_bal and co_bal.error_contab:
+    if any(b.error_contab for b in co_rows):
         alertas.append({"tipo": "error", "msg": "Saldo negativo detectado en cuenta 1305 — posible error de contabilización."})
     if saldo_2805 < 0:
         alertas.append({"tipo": "info", "msg": "Saldo a favor del cliente (2805) incluido en el neto de Colombia."})
