@@ -27,16 +27,30 @@ function Uploader({ tipo, label, hint, disabled, onDone }: { tipo: string; label
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  async function upload(file: File) {
+  function errText(d: any): string {
+    if (typeof d === "string") return d;
+    if (d?.mensaje) return d.mensaje;
+    return d ? JSON.stringify(d) : "Error";
+  }
+
+  async function upload(file: File, replace = false) {
     setBusy(true); setMsg(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await api.post(`/api/ingest/${tipo}`, fd);
+      const url = `/api/ingest/${tipo}${replace ? "?replace=true" : ""}`;
+      const { data } = await api.post(url, fd);
       setMsg({ ok: true, text: `OK: ${JSON.stringify(data).slice(0, 160)}` });
       onDone();
     } catch (e: any) {
-      setMsg({ ok: false, text: e?.response?.data?.detail ?? e?.message ?? "Error" });
+      const det = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && !replace) {
+        const m = det?.mensaje ?? "Ya existe información para este periodo. ¿Reemplazar?";
+        if (window.confirm(m)) { await upload(file, true); return; }
+        setMsg({ ok: false, text: "Carga cancelada (no se reemplazó)." });
+      } else {
+        setMsg({ ok: false, text: errText(det) || e?.message || "Error" });
+      }
     } finally {
       setBusy(false);
       if (ref.current) ref.current.value = "";
@@ -57,11 +71,36 @@ function Uploader({ tipo, label, hint, disabled, onDone }: { tipo: string; label
   );
 }
 
+function AccionesCell(p: any) {
+  const r = p.data as Carga;
+  const ctx = p.context || {};
+  return (
+    <div className="flex gap-2 items-center h-full">
+      <button title="Editar observaciones" onClick={() => ctx.onEdit?.(r)} className="hover:opacity-60">✏️</button>
+      {r.estado !== "eliminado" && (
+        <button title="Eliminar carga y registros" onClick={() => ctx.onDelete?.(r)} className="hover:opacity-60">🗑️</button>
+      )}
+    </div>
+  );
+}
+
 export default function Ingesta() {
   const est = useFetch<Estado>("/api/estado-datos");
   const hist = useFetch<Carga[]>("/api/ingest/archivos");
   const esAdminCo = rol() === "admin_co";
   const reloadAll = () => { est.reload(); hist.reload(); };
+
+  async function onEditObs(r: Carga) {
+    const obs = window.prompt("Observaciones / comentarios (no modifica datos contables):", r.observaciones || "");
+    if (obs === null) return;
+    try { await api.put(`/api/ingest/archivos/${r.id}`, { observaciones: obs }); hist.reload(); }
+    catch (e: any) { alert(e?.response?.data?.detail ?? "Error al guardar"); }
+  }
+  async function onDeleteCarga(r: Carga) {
+    if (!window.confirm(`Esta acción eliminará "${r.archivo}" (${r.tipo_label} ${r.periodo}) y TODOS los registros asociados. ¿Desea continuar?`)) return;
+    try { await api.delete(`/api/ingest/archivos/${r.id}`); reloadAll(); }
+    catch (e: any) { alert(typeof e?.response?.data?.detail === "string" ? e.response.data.detail : "Error al eliminar"); }
+  }
 
   const cols = useMemo<ColDef[]>(() => [
     { field: "tipo_label", headerName: "Tipo", width: 170, pinned: "left" },
@@ -75,6 +114,8 @@ export default function Ingesta() {
       cellClass: (p: any) => p.value === "cargado" ? "text-emerald-600 font-medium"
         : p.value === "reemplazado" ? "text-slate-400" : "text-amber-600" },
     { field: "observaciones", headerName: "Observaciones", minWidth: 180, tooltipField: "observaciones" },
+    { headerName: "Acciones", width: 110, pinned: "right", sortable: false, filter: false,
+      cellRenderer: AccionesCell },
   ], []);
 
   return (
@@ -110,7 +151,8 @@ export default function Ingesta() {
 
         <Card title="Historial de cargas" className="mt-4">
           {hist.data && hist.data.length > 0 ? (
-            <DataGrid gridId="ingesta-historial" columnDefs={cols} rowData={hist.data} pageSize={50} height="48vh" />
+            <DataGrid gridId="ingesta-historial" columnDefs={cols} rowData={hist.data} pageSize={50} height="48vh"
+              context={{ onEdit: onEditObs, onDelete: onDeleteCarga }} />
           ) : (
             <p className="text-sm text-slate-400">Aún no hay cargas registradas. Al subir un archivo aparecerá aquí con su periodo, usuario y fecha.</p>
           )}

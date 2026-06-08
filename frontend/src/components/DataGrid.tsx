@@ -12,13 +12,14 @@ export interface DataGridProps {
   pageSize?: number;
   onRowClicked?: (data: any) => void;
   getRowClass?: (params: any) => string | undefined;
+  context?: any;                  // expuesto a cellRenderers (p.ej. handlers de acciones)
 }
 
 // Grilla enterprise reutilizable (AG Grid Community, tema Quartz).
 // Cubre: resize, reorder (DnD), freeze/pin (colDef.pinned), virtual scroll,
 // sort, filtros por columna (floating), búsqueda rápida, columnas ocultables,
 // tooltips, header sticky y persistencia por usuario en localStorage.
-export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh", pageSize = 50, onRowClicked, getRowClass }: DataGridProps) {
+export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh", pageSize = 50, onRowClicked, getRowClass, context }: DataGridProps) {
   const apiRef = useRef<GridApi | null>(null);
   const [search, setSearch] = useState("");
   const [colsOpen, setColsOpen] = useState(false);
@@ -79,6 +80,7 @@ export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh",
           rowData={rowData}
           defaultColDef={defaultColDef}
           quickFilterText={search}
+          context={context}
           animateRows
           enableCellTextSelection
           suppressDragLeaveHidesColumns

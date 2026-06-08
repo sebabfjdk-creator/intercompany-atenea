@@ -58,3 +58,26 @@ def test_registrar_carga_historial_y_reemplazo(tmp_path, f_espana):
         assert cargas[1].registros_insertados == res["cuentas"]
         assert set(cargas[1].periodo.split(",")) == set(res["periodos"])
         assert len(cargas[1].hash_archivo) == 64
+
+
+def test_conflicto_periodo_y_eliminar(tmp_path, f_espana):
+    if not f_espana.exists():
+        pytest.skip("falta espana_delsol.xlsx")
+    S = _session(tmp_path)
+    with S() as db:
+        res = ingest_svc.ingest_espana(db, str(f_espana))
+        ingest_svc.registrar_carga(db, tipo="espana", nombre_original="v1.xlsx",
+                                   path=str(f_espana), resultado=res, usuario_id=None)
+        # mismos periodos -> conflicto detectado (control de duplicados)
+        conflicto = ingest_svc.periodos_en_conflicto(db, "espana", res["periodos"])
+        assert set(conflicto) == set(res["periodos"])
+        # un periodo nuevo NO entra en conflicto
+        assert ingest_svc.periodos_en_conflicto(db, "espana", ["2030-07"]) == []
+
+        # eliminar_datos_de borra las cuentas del periodo
+        from db.models import AccountPeriod as AP
+        n_antes = db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES"))
+        assert n_antes > 0
+        ingest_svc.eliminar_datos_de(db, "espana", ",".join(res["periodos"]))
+        db.commit()
+        assert db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES")) == 0

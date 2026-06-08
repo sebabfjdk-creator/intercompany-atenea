@@ -24,8 +24,20 @@ async def _save_tmp(file: UploadFile) -> str:
     return tmp.name
 
 
+def _conflicto_arap(db: Session, tipo: str, replace: bool) -> None:
+    if replace:
+        return
+    if ingest_svc.periodos_en_conflicto(db, tipo, [""]):
+        raise HTTPException(409, detail={
+            "code": "periodo_existe", "periodos": [],
+            "mensaje": "Ya existe una cartera AR/AP cargada para este país. ¿Deseas reemplazarla?",
+        })
+
+
 @router.post("/ingest/ar-ap/colombia")
-async def ingest_co(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def ingest_co(file: UploadFile = File(...), replace: bool = Query(False),
+                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _conflicto_arap(db, "arap_co", replace)
     path = await _save_tmp(file)
     try:
         try:
@@ -44,9 +56,11 @@ async def ingest_co(file: UploadFile = File(...), db: Session = Depends(get_db),
 
 
 @router.post("/ingest/ar-ap/espana")
-async def ingest_es(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def ingest_es(file: UploadFile = File(...), replace: bool = Query(False),
+                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if user.rol == "admin_co":
         raise HTTPException(403, "admin_co no puede modificar datos del libro de España")
+    _conflicto_arap(db, "arap_es", replace)
     path = await _save_tmp(file)
     try:
         try:

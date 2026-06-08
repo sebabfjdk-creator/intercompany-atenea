@@ -24,6 +24,8 @@ from sqlalchemy.orm import Session
 from db.models import (
     AccountMapping,
     AccountPeriod,
+    ArApBalance,
+    ArApMovimiento,
     FileUpload,
     ImportBatch,
     PygMovimiento,
@@ -207,6 +209,47 @@ def _record_batch(db: Session, sistema_id: int, file_hash: str, n: int) -> None:
     if existe:
         return
     db.add(ImportBatch(sistema_id=sistema_id, periodo_mes="2026-Q1", archivo_hash=h, estado="cargado"))
+
+
+def periodos_de(tipo: str, path: str) -> list[str]:
+    """Periodos que cargaría un archivo, SIN escribir (para control de duplicados).
+    Para homologacion/terceros/AR-AP no hay periodo -> [''] (dataset único)."""
+    if tipo == "espana":
+        return sorted(set(_match_sheet(_sheets(path), _ES_SHEETS).values()))
+    if tipo == "colombia":
+        s = _sheets(path)
+        return sorted(set(_match_sheet(s, _CO_SHEETS).values()) | set(_match_sheet(s, _CO_MVTO_SHEETS).values()))
+    return [""]
+
+
+def periodos_en_conflicto(db: Session, tipo: str, periodos: list[str]) -> list[str]:
+    """Periodos que ya tienen una carga activa ('cargado') del mismo tipo."""
+    nuevos = set(periodos)
+    activas = db.scalars(select(FileUpload).where(
+        FileUpload.tipo_archivo == tipo, FileUpload.estado == "cargado")).all()
+    return sorted({p for f in activas for p in f.periodo.split(",") if p in nuevos})
+
+
+def eliminar_datos_de(db: Session, tipo: str, periodo: str) -> None:
+    """Borra los registros contables asociados a una carga (para 🗑️ Eliminar).
+    La conciliación se recalcula sola (motor en vivo)."""
+    periodos = [p for p in periodo.split(",") if p]
+    if tipo == "espana":
+        db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "ES", AccountPeriod.periodo.in_(periodos)))
+        db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "ES", PygMovimiento.periodo.in_(periodos)))
+    elif tipo == "colombia":
+        db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO", AccountPeriod.periodo.in_(periodos)))
+        db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "CO", PygMovimiento.periodo.in_(periodos)))
+    elif tipo == "arap_es":
+        db.execute(delete(ArApBalance).where(ArApBalance.pais == "ES"))
+        db.execute(delete(ArApMovimiento).where(ArApMovimiento.pais == "ES"))
+    elif tipo == "arap_co":
+        db.execute(delete(ArApBalance).where(ArApBalance.pais == "CO"))
+        db.execute(delete(ArApMovimiento).where(ArApMovimiento.pais == "CO"))
+    elif tipo == "homologacion":
+        db.execute(delete(AccountMapping))
+    elif tipo == "terceros":
+        db.execute(delete(TerceroBridge))
 
 
 def registrar_carga(db: Session, *, tipo: str, nombre_original: str, path: str,
