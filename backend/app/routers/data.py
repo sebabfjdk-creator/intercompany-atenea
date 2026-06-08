@@ -163,6 +163,23 @@ def guardar_homologacion(body: HomologacionIn, db: Session = Depends(get_db), us
         raise HTTPException(422, str(e))
 
 
+class MoverCuentaIn(BaseModel):
+    cuenta: str
+    pais: str               # CO | ES
+    grupo_origen: str
+    grupo_destino: str
+
+
+@router.post("/config/homologacion/mover")
+def mover_cuenta(body: MoverCuentaIn, db: Session = Depends(get_db), user: User = Depends(require_editor)):
+    """Drag & drop: mueve una cuenta de un grupo a otro. Auto-guardado + auditoría."""
+    try:
+        return config_service.mover_cuenta(db, body.cuenta, body.pais,
+                                           body.grupo_origen, body.grupo_destino, user.id)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
 @router.put("/config/tolerancia")
 def guardar_tolerancia(body: ToleranciaIn, db: Session = Depends(get_db), user: User = Depends(require_editor)):
     config_service.set_tolerancia(db, body.tolerancia_abs_cop, body.tolerancia_pct, user.id)

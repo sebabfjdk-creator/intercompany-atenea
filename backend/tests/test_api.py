@@ -175,6 +175,32 @@ def test_config_tolerancia(client):
     assert client.post("/api/config/recalcular").json()["ok"] is True
 
 
+def test_homologacion_mover_cuenta(client):
+    h = client.get("/api/config/homologacion").json()
+    grupos = h["grupos"]
+    origen = next((g for g in grupos if g["cuentas_co"]), None)
+    destino = next((g for g in grupos if origen and g["grupo"] != origen["grupo"]), None)
+    assert origen and destino, "se requieren 2 grupos para mover"
+    cuenta = origen["cuentas_co"][0]
+    r = client.post("/api/config/homologacion/mover", json={
+        "cuenta": cuenta, "pais": "CO",
+        "grupo_origen": origen["grupo"], "grupo_destino": destino["grupo"]})
+    assert r.status_code == 200, r.text
+    h2 = {g["grupo"]: g for g in r.json()["grupos"]}
+    assert cuenta not in h2.get(origen["grupo"], {}).get("cuentas_co", [])
+    assert cuenta in h2[destino["grupo"]]["cuentas_co"]
+    # mover al mismo grupo -> 422
+    bad = client.post("/api/config/homologacion/mover", json={
+        "cuenta": cuenta, "pais": "CO",
+        "grupo_origen": destino["grupo"], "grupo_destino": destino["grupo"]})
+    assert bad.status_code == 422
+    # cuenta inexistente en origen -> 422
+    bad2 = client.post("/api/config/homologacion/mover", json={
+        "cuenta": "NO_EXISTE_999", "pais": "CO",
+        "grupo_origen": origen["grupo"], "grupo_destino": destino["grupo"]})
+    assert bad2.status_code == 422
+
+
 def test_config_export(client):
     r = client.get("/api/config/homologacion/export")
     assert r.status_code == 200

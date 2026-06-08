@@ -89,6 +89,67 @@ def get_homologacion(db: Session) -> dict:
     }
 
 
+def _grupo_sets(db: Session, nombre: str) -> tuple[set[str], set[str]]:
+    co: set[str] = set()
+    es: set[str] = set()
+    for r in db.scalars(select(AccountMapping).where(
+            AccountMapping.grupo_homologado == nombre, AccountMapping.activo.is_(True))).all():
+        if r.cuenta_co_patron:
+            co.add(r.cuenta_co_patron)
+        if r.cuenta_es:
+            es.add(r.cuenta_es)
+    return co, es
+
+
+def _rel_de(db: Session, nombre: str) -> str:
+    g = db.scalar(select(HomologationGroup).where(HomologationGroup.nombre == nombre))
+    return g.tipo_relacion if (g and g.tipo_relacion in RELACIONES_VALIDAS) else "n_a_n"
+
+
+def _rewrite_group(db: Session, nombre: str, co: set[str] | list[str], es: set[str] | list[str], rel: str) -> None:
+    db.execute(delete(AccountMapping).where(AccountMapping.grupo_homologado == nombre))
+    co = sorted(c for c in co if c)
+    es = sorted(e for e in es if e)
+    if not co and not es:
+        return  # grupo vacío: no se insertan mappings (desaparece del tablero)
+    for c, e in [(c, e) for c in (co or [""]) for e in (es or [""])]:
+        db.add(AccountMapping(cuenta_co_patron=c, cuenta_es=e, grupo_homologado=nombre,
+                              tipo_relacion=rel, confianza="alta", activo=True))
+
+
+def mover_cuenta(db: Session, cuenta: str, pais: str, grupo_origen: str,
+                 grupo_destino: str, usuario_id=None) -> dict:
+    """Mueve UNA cuenta (CO o ES) de un grupo a otro (drag & drop). Recalcula solo
+    los dos grupos afectados y registra el movimiento en audit_log."""
+    cuenta = str(cuenta).strip()
+    pais = (pais or "").upper()
+    if pais not in ("CO", "ES"):
+        raise ValueError("pais debe ser CO o ES")
+    if grupo_origen == grupo_destino:
+        raise ValueError("El grupo origen y destino son el mismo")
+    if not db.scalar(select(HomologationGroup).where(HomologationGroup.nombre == grupo_destino)):
+        raise ValueError(f"El grupo destino '{grupo_destino}' no existe")
+
+    co_o, es_o = _grupo_sets(db, grupo_origen)
+    co_d, es_d = _grupo_sets(db, grupo_destino)
+    origen_set = co_o if pais == "CO" else es_o
+    destino_set = co_d if pais == "CO" else es_d
+    if cuenta not in origen_set:
+        raise ValueError(f"La cuenta {cuenta} no está en el grupo origen '{grupo_origen}'")
+    if cuenta in destino_set:
+        raise ValueError(f"La cuenta {cuenta} ya está en el grupo destino")
+
+    origen_set.discard(cuenta)
+    destino_set.add(cuenta)
+    _rewrite_group(db, grupo_origen, co_o, es_o, _rel_de(db, grupo_origen))
+    _rewrite_group(db, grupo_destino, co_d, es_d, _rel_de(db, grupo_destino))
+    db.add(AuditLog(entidad="homologacion_mover", entidad_id=cuenta, accion="update",
+                    valor_antes=f"{pais} {cuenta} en '{grupo_origen}'",
+                    valor_despues=f"{pais} {cuenta} -> '{grupo_destino}'", usuario_id=usuario_id))
+    db.commit()
+    return get_homologacion(db)
+
+
 def save_homologacion(db: Session, grupos: list[dict], usuario_id=None) -> dict:
     """Reescribe HomologationGroup + account_mapping desde el payload completo."""
     # validación

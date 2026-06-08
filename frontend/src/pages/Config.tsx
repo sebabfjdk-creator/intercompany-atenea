@@ -5,6 +5,7 @@ import { useFetch, rol } from "../lib/useFetch";
 import { fmtCOP, fmtPct } from "../lib/format";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
 import DataGrid from "../components/DataGrid";
+import HomologacionBoard from "../components/HomologacionBoard";
 
 interface Grupo {
   id?: number | null; grupo: string; tipo: string; tipo_relacion: string;
@@ -45,6 +46,7 @@ export default function Config() {
   const [tolAbs, setTolAbs] = useState(0);
   const [tolPct, setTolPct] = useState(0);
   const [search, setSearch] = useState("");
+  const [vista, setVista] = useState<"tabla" | "tablero">("tabla");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [changes, setChanges] = useState(0);
@@ -171,7 +173,20 @@ export default function Config() {
                   </div>
                 </>
               ) : (
-                <DataGrid gridId="homologacion" columnDefs={cols} rowData={data.grupos} pageSize={100} autoSize="content" />
+                <>
+                  <div className="flex items-center gap-1 mb-3">
+                    <button onClick={() => setVista("tabla")}
+                      className={`px-3 py-1.5 text-sm rounded ${vista === "tabla" ? "bg-co text-white" : "border text-slate-600"}`}>Tabla</button>
+                    <button onClick={() => setVista("tablero")}
+                      className={`px-3 py-1.5 text-sm rounded ${vista === "tablero" ? "bg-co text-white" : "border text-slate-600"}`}>Tablero (arrastrar)</button>
+                    {vista === "tablero" && <span className="text-xs text-slate-400 ml-2">Arrastra una cuenta a otro grupo · guardado automático · deshacer 30 s</span>}
+                  </div>
+                  {vista === "tabla" ? (
+                    <DataGrid gridId="homologacion" columnDefs={cols} rowData={data.grupos} pageSize={100} autoSize="content" />
+                  ) : (
+                    <HomologacionBoard grupos={data.grupos} puedeEditar={puedeEditar} onChanged={reload} />
+                  )}
+                </>
               )}
             </Card>
             {!puedeEditar && <p className="text-xs text-slate-400 mt-3">Tu rol es de solo lectura sobre la configuración.</p>}
