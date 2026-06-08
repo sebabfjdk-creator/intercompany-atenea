@@ -11,6 +11,7 @@ import Terceros from "./pages/Terceros";
 import Excepciones from "./pages/Excepciones";
 import Auditoria from "./pages/Auditoria";
 import Config from "./pages/Config";
+import Parametros from "./pages/Parametros";
 import Ingesta from "./pages/Ingesta";
 import ArAp from "./pages/ArAp";
 import Usuarios from "./pages/Usuarios";
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
       { path: "auditoria", element: <Auditoria /> },
       { path: "usuarios", element: <Usuarios /> },
       { path: "config", element: <Config /> },
+      { path: "config/parametros", element: <Parametros /> },
     ],
   },
 ]);
