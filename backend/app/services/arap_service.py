@@ -120,12 +120,14 @@ def ingest_colombia(db: Session, path: str) -> dict:
         for t in co:
             if tipo == "AR":
                 db.add(ArApBalance(pais="CO", tipo="AR", nit=t.nit, cuenta="1305/2805",
-                                   nombre=t.nombre[:255], saldo=round(t.saldo_1305 + t.saldo_2805, 2),
+                                   nombre=t.nombre[:255], saldo=t.saldo_cliente,
                                    saldo_a=t.saldo_1305, saldo_b=t.saldo_2805,
                                    error_contab=t.error_contabilizacion))
             else:
-                db.add(ArApBalance(pais="CO", tipo="AP", nit=t.nit, cuenta="22xx",
-                                   nombre=t.nombre[:255], saldo=round(t.saldo_22xx, 2)))
+                # Proveedor CO = (220501+221001+230501+23351001) - 13300501 (anticipos)
+                db.add(ArApBalance(pais="CO", tipo="AP", nit=t.nit, cuenta="22xx/23xx-1330",
+                                   nombre=t.nombre[:255], saldo=t.saldo_proveedor,
+                                   saldo_a=t.saldo_prov, saldo_b=-t.saldo_anticipo_prov))
         for nit, m in parse_arap_colombia_movimientos(path, sheet):
             db.add(ArApMovimiento(pais="CO", tipo=tipo, nit=nit, cuenta=m.cuenta,
                                   fecha=m.fecha, concepto=str(m.concepto)[:500],

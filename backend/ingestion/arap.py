@@ -68,17 +68,28 @@ class SaldoTerceroES:
     movimientos: list = None  # list[MovArAp] del bloque (detalle)
 
 
+# Cuentas de proveedores Colombia (clase 22 y 23) y anticipos a proveedores (1330)
+_PROV_CO = ("220501", "221001", "230501", "23351001")
+_ANTICIPO_PROV_CO = ("13300501",)
+
+
 @dataclass
 class SaldoTerceroCO:
     nit: str
     nombre: str
     saldo_1305: float
     saldo_2805: float
-    saldo_22xx: float
+    saldo_prov: float = 0.0           # 220501+221001+230501+23351001
+    saldo_anticipo_prov: float = 0.0  # 13300501 (anticipos entregados)
 
     @property
-    def saldo_neto(self) -> float:
-        return round(self.saldo_1305 + self.saldo_2805 + self.saldo_22xx, 2)
+    def saldo_cliente(self) -> float:
+        # 2805 (saldos a favor) viene con signo negativo -> sumarlo = restarlo
+        return round(self.saldo_1305 + self.saldo_2805, 2)
+
+    @property
+    def saldo_proveedor(self) -> float:
+        return round(self.saldo_prov - self.saldo_anticipo_prov, 2)
 
     @property
     def error_contabilizacion(self) -> bool:
@@ -91,6 +102,13 @@ def _cell_amarilla(cell) -> bool:
         return False
     rgb = getattr(f.fgColor, "rgb", None)
     return str(rgb) == _AMARILLO
+
+
+def _es_provisional_codigo(cod: str) -> bool:
+    """Provisional por patrón de código: NNN.9.x.xxx (430.9 / 431.9 / 410.9 —
+    facturas pendientes de emitir/recibir, cuentas temporales de cierre)."""
+    partes = cod.split(".")
+    return len(partes) >= 2 and partes[1] == "9"
 
 
 def parse_arap_espana(path, sheet: str) -> list[SaldoTerceroES]:
@@ -106,7 +124,7 @@ def parse_arap_espana(path, sheet: str) -> list[SaldoTerceroES]:
             if cod:
                 nombre = str(c0.value).strip()[len(cod):].strip()
                 actual = SaldoTerceroES(cuenta_es=cod, nombre=nombre, saldo=0.0,
-                                        es_provisional=_cell_amarilla(c0), movimientos=[])
+                                        es_provisional=_cell_amarilla(c0) or _es_provisional_codigo(cod), movimientos=[])
                 out.append(actual)
                 continue
             docum = str(row[_ES_DOCUM].value).strip().lower() if row[_ES_DOCUM].value is not None else ""
@@ -149,14 +167,16 @@ def parse_arap_colombia(path, sheet: str) -> list[SaldoTerceroCO]:
             t = agg.get(nit_s)
             if t is None:
                 t = SaldoTerceroCO(nit=nit_s, nombre=str(row[c_nterc]).strip() if row[c_nterc] else "",
-                                   saldo_1305=0.0, saldo_2805=0.0, saldo_22xx=0.0)
+                                   saldo_1305=0.0, saldo_2805=0.0)
                 agg[nit_s] = t
             if cuenta.startswith("1305"):
                 t.saldo_1305 = round(t.saldo_1305 + saldo, 2)
             elif cuenta.startswith("2805"):
                 t.saldo_2805 = round(t.saldo_2805 + saldo, 2)
-            elif cuenta.startswith("22"):
-                t.saldo_22xx = round(t.saldo_22xx + saldo, 2)
+            elif any(cuenta.startswith(p) for p in _PROV_CO):
+                t.saldo_prov = round(t.saldo_prov + saldo, 2)
+            elif any(cuenta.startswith(p) for p in _ANTICIPO_PROV_CO):
+                t.saldo_anticipo_prov = round(t.saldo_anticipo_prov + saldo, 2)
         return list(agg.values())
     finally:
         wb.close()

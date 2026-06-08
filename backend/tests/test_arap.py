@@ -35,6 +35,30 @@ def test_parser_espana_provisionales(f_cartera):
     assert link and round(link.saldo, 2) == 501657.75
 
 
+def test_reglas_agregacion_co_proveedor(f_cartera):
+    # CO Proveedores = 220501+221001+230501+23351001 - 13300501 (incluye clase 23)
+    if not f_cartera.exists():
+        pytest.skip("falta cartera")
+    from ingestion.arap import _ANTICIPO_PROV_CO, _PROV_CO, parse_arap_colombia
+    assert {"220501", "221001", "230501", "23351001"} <= set(_PROV_CO)
+    assert "13300501" in _ANTICIPO_PROV_CO
+    co = parse_arap_colombia(f_cartera, "CXPNeuron")
+    # debe agregar saldo de proveedores (incluida clase 23 = 230501, la mayoría)
+    assert sum(t.saldo_proveedor for t in co) != 0
+    assert any(t.saldo_prov != 0 for t in co)
+
+
+def test_reglas_agregacion_es_clientes(f_cartera):
+    # ES Clientes consolida 430 + 431; provisionales .9 quedan separadas
+    if not f_cartera.exists():
+        pytest.skip("falta cartera")
+    from ingestion.arap import parse_arap_espana
+    es = parse_arap_espana(f_cartera, "CarteraAtenea")
+    cods = {t.cuenta_es[:3] for t in es if not t.es_provisional}
+    assert "430" in cods and "431" in cods
+    assert all(t.es_provisional for t in es if t.cuenta_es.split(".")[1] == "9")
+
+
 def test_parser_colombia_error_1305(f_cartera):
     if not f_cartera.exists():
         pytest.skip("falta cartera")
