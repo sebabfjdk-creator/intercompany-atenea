@@ -77,6 +77,16 @@ def movimientos_tercero(nit: str = Query(...), desde: str | None = Query(None), 
     return svc.movimientos_tercero(db, nit, desde, hasta)
 
 
+@router.get("/ar-ap/tercero/{nit}")
+def tercero_360(nit: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return svc.tercero_360(db, nit)
+
+
+@router.get("/ar-ap/kpis")
+def kpis(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return svc.kpis_arap(db)
+
+
 @router.get("/ar-ap/excepciones")
 def excepciones(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return svc.excepciones(db)

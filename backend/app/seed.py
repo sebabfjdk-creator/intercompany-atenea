@@ -11,15 +11,26 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.auth import hash_password
 from db.base import Base, SessionLocal, engine
 from db.models import SourceSystem, User
 
+# Mini-migraciones idempotentes para columnas añadidas a tablas existentes
+# (en prod usamos create_all, que NO altera tablas ya creadas). Solo Postgres.
+_PG_ALTERS = [
+    "ALTER TABLE arap_movimiento ADD COLUMN IF NOT EXISTS documento VARCHAR(60) DEFAULT ''",
+    "ALTER TABLE arap_movimiento ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(20) DEFAULT ''",
+]
+
 
 def crear_esquema() -> None:
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as conn:
+            for stmt in _PG_ALTERS:
+                conn.execute(text(stmt))
 
 
 def _ensure_user(db, email: str, nombre: str, password: str, rol: str) -> None:

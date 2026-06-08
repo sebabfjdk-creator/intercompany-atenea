@@ -11,7 +11,7 @@ Estados de conciliación:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -19,9 +19,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from db.models import ArApBalance, ArApMovimiento, TerceroBridge
 from ingestion.arap import (
+    normalizar_doc,
     parse_arap_colombia,
     parse_arap_colombia_movimientos,
     parse_arap_espana,
+    tipo_documento,
 )
 
 settings = get_settings()
@@ -78,6 +80,7 @@ def ingest_espana(db: Session, path: str) -> dict:
             for m in (t.movimientos or []):
                 db.add(ArApMovimiento(pais="ES", tipo=tipo, nit=nit, cuenta=t.cuenta_es,
                                       fecha=m.fecha, concepto=str(m.concepto)[:500],
+                                      documento=str(m.documento)[:60], tipo_documento=tipo_documento(m.documento),
                                       debe=round(m.debe, 2), haber=round(m.haber, 2), saldo=round(m.saldo, 2)))
         for key, a in agg.items():
             db.add(ArApBalance(pais="ES", tipo=tipo, nit=a.get("nit", ""), cuenta=a["cuenta"],
@@ -113,6 +116,7 @@ def ingest_colombia(db: Session, path: str) -> dict:
         for nit, m in parse_arap_colombia_movimientos(path, sheet):
             db.add(ArApMovimiento(pais="CO", tipo=tipo, nit=nit, cuenta=m.cuenta,
                                   fecha=m.fecha, concepto=str(m.concepto)[:500],
+                                  documento=str(m.documento)[:60], tipo_documento=tipo_documento(m.documento),
                                   debe=round(m.debe, 2), haber=round(m.haber, 2), saldo=round(m.saldo, 2)))
         resumen[tipo] = len(co)
     db.commit()
@@ -270,6 +274,183 @@ def errores_contables(db: Session) -> list[dict]:
 def provisionales(db: Session) -> list[dict]:
     rows = db.scalars(select(ArApBalance).where(ArApBalance.es_provisional.is_(True))).all()
     return [{"cuenta_es": r.cuenta, "nombre": r.nombre, "saldo": float(r.saldo), "tipo": r.tipo} for r in rows]
+
+
+def _antiguedad_bucket(dias: int | None) -> str:
+    if dias is None:
+        return "—"
+    if dias <= 30:
+        return "0-30 días"
+    if dias <= 60:
+        return "31-60 días"
+    if dias <= 90:
+        return "61-90 días"
+    return "Más de 90 días"
+
+
+def tercero_360(db: Session, nit: str) -> dict:
+    """Vista 360 de un tercero: resumen ejecutivo, movimientos CO/ES con documento,
+    línea de tiempo, análisis automático y matching documental (trazabilidad)."""
+    from app.services import config_service
+    from db.models import ArApMovimiento
+    umbral, _ = config_service.get_tolerancia(db)
+
+    bal = db.scalars(select(ArApBalance).where(ArApBalance.nit == nit)).all()
+    co_rows = [b for b in bal if b.pais == "CO"]
+    saldo_co = round(sum(float(b.saldo) for b in co_rows), 2)
+    saldo_es = round(sum(float(b.saldo) for b in bal if b.pais == "ES"), 2)
+    diferencia = round(saldo_co - saldo_es, 2)
+    nombre = (co_rows[0].nombre if co_rows else None) or (bal[0].nombre if bal else "")
+
+    movs = db.scalars(select(ArApMovimiento).where(ArApMovimiento.nit == nit).order_by(ArApMovimiento.fecha)).all()
+
+    def serial(m):
+        return {
+            "fecha": m.fecha.isoformat() if m.fecha else None,
+            "periodo": (m.fecha.strftime("%Y-%m") if m.fecha else m.periodo if hasattr(m, "periodo") else ""),
+            "cuenta": m.cuenta, "documento": m.documento, "tipo_documento": m.tipo_documento,
+            "concepto": m.concepto, "debe": float(m.debe), "haber": float(m.haber), "saldo": float(m.saldo),
+        }
+    mov_co = [serial(m) for m in movs if m.pais == "CO"]
+    mov_es = [serial(m) for m in movs if m.pais == "ES"]
+
+    fechas = [m.fecha for m in movs if m.fecha]
+    hoy = datetime.now(timezone.utc)
+    ult = max(fechas) if fechas else None
+    prim = min(fechas) if fechas else None
+    dias_ult = (hoy - ult.replace(tzinfo=timezone.utc)).days if ult else None
+    conciliado = abs(diferencia) <= umbral
+    error_co = any(b.error_contab for b in co_rows)
+    if conciliado:
+        estado = "Conciliado"
+    elif error_co:
+        estado = "Pendiente de revisión"
+    elif dias_ult is not None and dias_ult <= 60:
+        estado = "Diferencia temporal"
+    else:
+        estado = "Diferencia permanente"
+
+    # línea de tiempo (CO + ES por fecha)
+    timeline = []
+    for m in movs:
+        if not m.fecha:
+            continue
+        pais_lbl = "Colombia" if m.pais == "CO" else "España"
+        valor = round(float(m.debe) - float(m.haber), 2)
+        evento = f"{m.tipo_documento or 'Movimiento'} registrado en {pais_lbl}"
+        timeline.append({"fecha": m.fecha.isoformat(), "pais": m.pais, "evento": evento,
+                         "documento": m.documento, "valor": valor})
+    timeline.sort(key=lambda x: x["fecha"])
+
+    # análisis automático (reglas)
+    analisis = []
+    if conciliado:
+        analisis.append("Conciliado: los saldos de Colombia y España coinciden dentro de la tolerancia.")
+    else:
+        if error_co:
+            analisis.append("Posible error de contabilización: saldo negativo en cuenta 1305 (revisar reclasificación a 2805).")
+        if saldo_es == 0 and saldo_co != 0:
+            analisis.append("La diferencia está abierta en Colombia y no tiene contraparte en España (factura/provisión solo en Colombia o pendiente de registro en España).")
+        elif saldo_co == 0 and saldo_es != 0:
+            analisis.append("La diferencia está abierta en España sin contraparte en Colombia.")
+        elif (saldo_co > 0) != (saldo_es > 0):
+            analisis.append("Saldos con signos opuestos: posible error de imputación o nota crédito registrada en un solo país.")
+        else:
+            analisis.append("Diferencia entre ambos saldos: revisar documentos sin contraparte.")
+        pagos_es = any(m.pais == "ES" and (m.tipo_documento or "").lower().startswith(("recibo", "pago")) for m in movs)
+        pagos_co = any(m.pais == "CO" and (m.tipo_documento or "").lower().startswith(("recibo", "pago")) for m in movs)
+        if pagos_es and not pagos_co:
+            analisis.append("Se registró un pago en España pero la operación sigue abierta en Colombia (diferencia temporal por timing).")
+        if pagos_co and not pagos_es:
+            analisis.append("Se registró un pago en Colombia pero la operación sigue abierta en España (diferencia temporal por timing).")
+
+    return {
+        "nit": nit, "nombre": nombre,
+        "resumen": {
+            "saldo_co": saldo_co, "saldo_es": saldo_es, "diferencia": diferencia,
+            "estado": estado, "antiguedad": _antiguedad_bucket(dias_ult), "dias_ultimo_mov": dias_ult,
+            "mes_origen": prim.strftime("%Y-%m") if prim else None,
+            "ultimo_movimiento": ult.isoformat() if ult else None,
+            "ultima_conciliacion": None,
+        },
+        "movimientos_co": mov_co, "movimientos_es": mov_es,
+        "timeline": timeline,
+        "analisis": analisis,
+        "matching": matching_documental(mov_co, mov_es),
+    }
+
+
+def matching_documental(mov_co: list[dict], mov_es: list[dict]) -> list[dict]:
+    """Cruza documentos CO<->ES por nº de referencia normalizado + valor + (cercanía).
+    Confianza: 95 (nº doc + valor), 80 (nº doc), 60 (solo valor)."""
+    def absval(m):
+        return round(abs(m["debe"] - m["haber"]), 2)
+    es_por_doc: dict[str, list[dict]] = defaultdict(list)
+    for e in mov_es:
+        es_por_doc[normalizar_doc(e["documento"])].append(e)
+    usados = set()
+    out = []
+    for c in mov_co:
+        dc = normalizar_doc(c["documento"])
+        cand = es_por_doc.get(dc, []) if dc else []
+        match, conf = None, 0
+        for e in cand:
+            if id(e) in usados:
+                continue
+            conf = 95 if absval(e) == absval(c) and absval(c) > 0 else 80
+            match = e
+            break
+        if not match and absval(c) > 0:  # fallback por valor exacto
+            for e in mov_es:
+                if id(e) in usados:
+                    continue
+                if absval(e) == absval(c):
+                    match, conf = e, 60
+                    break
+        if match:
+            usados.add(id(match))
+            out.append({
+                "co_documento": c["documento"], "co_valor": absval(c), "co_fecha": c["fecha"],
+                "es_documento": match["documento"], "es_valor": absval(match), "es_fecha": match["fecha"],
+                "confianza": conf,
+            })
+    return out
+
+
+def kpis_arap(db: Session) -> dict:
+    """KPIs ejecutivos AR/AP: diferencias abiertas/conciliadas, >90 días, top terceros y cuentas."""
+    from db.models import ArApMovimiento
+    rec = reconciliacion(db)
+    filas = rec["filas"]
+    abiertas = [f for f in filas if f["estado"] != "CONCILIADO"]
+    conciliadas = [f for f in filas if f["estado"] == "CONCILIADO"]
+
+    rows = db.execute(select(ArApMovimiento.nit, func.max(ArApMovimiento.fecha)).group_by(ArApMovimiento.nit)).all()
+    last = {nit: f for nit, f in rows if f}
+    hoy = datetime.now(timezone.utc)
+
+    def dias(nit):
+        f = last.get(nit)
+        return (hoy - f.replace(tzinfo=timezone.utc)).days if f else None
+
+    mayores90 = [f for f in abiertas if f["nit"] and (dias(f["nit"]) is None or dias(f["nit"]) > 90)]
+    top_terceros = sorted(filas, key=lambda x: abs(x["diferencia"]), reverse=True)[:20]
+
+    cta: dict[str, float] = defaultdict(float)
+    for b in db.scalars(select(ArApBalance).where(ArApBalance.es_provisional.is_(False))).all():
+        if b.cuenta:
+            cta[b.cuenta] += abs(float(b.saldo))
+    top_cuentas = sorted([{"cuenta": k, "monto": round(v, 2)} for k, v in cta.items()],
+                         key=lambda x: x["monto"], reverse=True)[:10]
+    return {
+        "diferencias_abiertas": len(abiertas),
+        "diferencias_conciliadas": len(conciliadas),
+        "mayores_90_dias": len(mayores90),
+        "monto_abierto": round(sum(abs(f["diferencia"]) for f in abiertas), 2),
+        "top_terceros": [{"nit": f["nit"], "nombre": f["nombre"], "diferencia": f["diferencia"],
+                          "estado": f["estado"], "dias": dias(f["nit"])} for f in top_terceros],
+        "top_cuentas": top_cuentas,
+    }
 
 
 def estado_datos(db: Session) -> dict:

@@ -15,12 +15,33 @@ Saldo negativo en 1305 -> error_contabilizacion (debería estar en 2805).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
 import openpyxl
 
 from ingestion.utils import es_codigo_cuenta_es, parse_es_number
+
+# Mapeo de prefijo de documento -> tipo legible
+_TIPO_DOC = {
+    "FA": "Factura", "FE": "Factura", "FV": "Factura",
+    "NC": "Nota crédito", "NCA": "Nota crédito", "ND": "Nota débito",
+    "RC": "Recibo/Pago", "CL": "Pago", "PR": "Provisión",
+}
+
+
+def normalizar_doc(doc) -> str:
+    """Número de documento sin guiones ni espacios, en mayúsculas (para cruce CO<->ES)."""
+    return re.sub(r"[\s\-]", "", str(doc or "")).upper()
+
+
+def tipo_documento(doc) -> str:
+    s = normalizar_doc(doc)
+    m = re.match(r"^([A-Z]+)", s)
+    if not m:
+        return "Otro" if s else ""
+    return _TIPO_DOC.get(m.group(1), "Otro")
 
 # --- España: índices de columna fijos (sin fila de cabecera) ---
 _ES_DOCUM, _ES_DEBE, _ES_HABER, _ES_SALDO = 5, 6, 7, 8
@@ -35,6 +56,7 @@ class MovArAp:
     debe: float
     haber: float
     saldo: float
+    documento: str = ""
 
 
 @dataclass
@@ -96,6 +118,7 @@ def parse_arap_espana(path, sheet: str) -> list[SaldoTerceroES]:
                 actual.movimientos.append(MovArAp(
                     cuenta=actual.cuenta_es, fecha=c0.value,
                     concepto=str(row[4].value).strip() if row[4].value is not None else "",
+                    documento=str(row[_ES_DOCUM].value).strip() if row[_ES_DOCUM].value is not None else "",
                     debe=parse_es_number(row[_ES_DEBE].value),
                     haber=parse_es_number(row[_ES_HABER].value),
                     saldo=parse_es_number(row[_ES_SALDO].value),
@@ -157,7 +180,8 @@ def parse_arap_colombia_movimientos(path, sheet: str) -> list[tuple[str, MovArAp
             out.append((str(nit).strip(), MovArAp(
                 cuenta=str(row[c_cta]).strip() if row[c_cta] is not None else "",
                 fecha=fec if isinstance(fec, datetime) else None,
-                concepto=(str(row[c_ncta]).strip() if row[c_ncta] else "") + (f" · {str(ref).strip()}" if ref else ""),
+                concepto=(str(row[c_ncta]).strip() if row[c_ncta] else ""),
+                documento=str(ref).strip() if ref else "",
                 debe=parse_es_number(row[c_deb] if c_deb < len(row) else 0),
                 haber=parse_es_number(row[c_cred] if c_cred < len(row) else 0),
                 saldo=parse_es_number(row[c_saldo] if c_saldo < len(row) else 0),

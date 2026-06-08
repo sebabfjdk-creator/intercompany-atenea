@@ -97,6 +97,38 @@ def test_resumen_proveedor_usa_22xx(db):
         assert det["resumen"]["saldo_co"] != 0
 
 
+def test_tercero_360(db):
+    r = svc.reconciliacion(db)
+    fila = next((f for f in r["filas"] if f["nit"] and f["estado"] in ("CONCILIADO", "DIFERENCIA")), None)
+    assert fila
+    v = svc.tercero_360(db, fila["nit"])
+    assert set(v["resumen"]) >= {"saldo_co", "saldo_es", "diferencia", "estado", "antiguedad", "mes_origen", "ultimo_movimiento"}
+    assert v["resumen"]["estado"] in ("Conciliado", "Diferencia temporal", "Diferencia permanente", "Pendiente de revisión")
+    assert isinstance(v["timeline"], list) and isinstance(v["analisis"], list) and v["analisis"]
+    assert "matching" in v
+    # los movimientos traen documento y tipo_documento
+    todos = v["movimientos_co"] + v["movimientos_es"]
+    if todos:
+        assert set(todos[0]) >= {"documento", "tipo_documento", "saldo", "debe", "haber"}
+
+
+def test_kpis_arap(db):
+    k = svc.kpis_arap(db)
+    assert set(k) >= {"diferencias_abiertas", "diferencias_conciliadas", "mayores_90_dias", "top_terceros", "top_cuentas"}
+    assert len(k["top_terceros"]) <= 20
+    assert k["diferencias_abiertas"] + k["diferencias_conciliadas"] > 0
+
+
+def test_documento_capturado(f_cartera):
+    if not f_cartera.exists():
+        pytest.skip("falta cartera")
+    from ingestion.arap import parse_arap_espana, tipo_documento
+    es = parse_arap_espana(f_cartera, "CarteraAtenea")
+    docs = [m.documento for t in es for m in (t.movimientos or []) if m.documento]
+    assert docs, "no se capturó ningún documento ES"
+    assert tipo_documento("FA3621") == "Factura" and tipo_documento("NC100") == "Nota crédito"
+
+
 def test_filtro_fecha(db):
     # rango imposible -> sin débitos
     r = svc.reconciliacion(db, desde="2030-01-01", hasta="2030-12-31")

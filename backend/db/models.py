@@ -322,6 +322,8 @@ class ArApMovimiento(Base):
     cuenta: Mapped[str] = mapped_column(String(40), default="")
     fecha: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     concepto: Mapped[str] = mapped_column(Text, default="")
+    documento: Mapped[str] = mapped_column(String(60), default="", index=True)
+    tipo_documento: Mapped[str] = mapped_column(String(20), default="")
     debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
     haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
     saldo: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
