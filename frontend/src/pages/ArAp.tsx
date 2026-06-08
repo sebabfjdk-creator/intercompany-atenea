@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import type { ColDef } from "ag-grid-community";
 import { descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
+import DataGrid from "../components/DataGrid";
 import { fmtCOP } from "../lib/format";
 import { fmtFecha } from "../lib/daterange";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
@@ -18,9 +20,6 @@ function EstadoBadge({ estado }: { estado: string }) {
   };
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${map[estado] ?? "bg-slate-100"}`}>{estado}</span>;
 }
-const CatBadge = ({ cat }: { cat: string }) => (
-  <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${cat === "CLIENTE" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>{cat}</span>
-);
 const signo = (n: number) => (n < 0 ? "text-red-600" : "text-emerald-600");
 
 const TABS = ["Conciliación", "Indicadores", "Errores contables", "Provisionales (ES)"] as const;
@@ -60,41 +59,28 @@ function SplitPane({ left, right }: { left: React.ReactNode; right: React.ReactN
 
 function Conciliacion({ sel, setSel }: { sel: string | null; setSel: (n: string | null) => void }) {
   const { data, loading, error, reload } = useFetch<Comp>("/api/ar-ap/comparativa");
-  const [tipo, setTipo] = useState(""); const [estado, setEstado] = useState("");
   const empty = !!data && data.filas.length === 0;
-  const filas = useMemo(() => (data?.filas ?? []).filter((f) => (!tipo || f.tipo === tipo) && (!estado || f.estado === estado)), [data, tipo, estado]);
+
+  const cols = useMemo<ColDef[]>(() => [
+    { field: "nombre", headerName: "Tercero", pinned: "left", minWidth: 200, tooltipField: "nombre",
+      cellRenderer: (p: any) => p.data.matched_por === "nombre"
+        ? `${p.value || "—"}  ↔` : (p.value || "—") },
+    { field: "categoria", headerName: "Cat.", width: 120 },
+    { field: "nit", headerName: "NIT/NIF", width: 130 },
+    { field: "saldo_co", headerName: "Saldo CO", type: "numericColumn", valueFormatter: (p) => fmtCOP(p.value) },
+    { field: "saldo_es", headerName: "Saldo ES", type: "numericColumn", valueFormatter: (p) => fmtCOP(p.value) },
+    { field: "diferencia", headerName: "Diferencia", type: "numericColumn", valueFormatter: (p) => fmtCOP(p.value),
+      cellStyle: (p) => ({ color: p.data.estado === "CONCILIADO" ? "#059669" : "#dc2626", fontWeight: 600 }) },
+    { field: "estado", headerName: "Estado", width: 140 },
+  ], []);
 
   const left = (
     <Card className="h-full">
       <DataState loading={loading} error={error} empty={empty} onRetry={reload}>
         {data && (
-          <>
-            <div className="flex gap-2 mb-3">
-              <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="border rounded px-2 py-1 text-sm"><option value="">AR+AP</option><option value="AR">Cobrar</option><option value="AP">Pagar</option></select>
-              <select value={estado} onChange={(e) => setEstado(e.target.value)} className="border rounded px-2 py-1 text-sm"><option value="">Estados</option>{["CONCILIADO","DIFERENCIA","ERROR_CO","SIN_MATCH"].map(s=><option key={s}>{s}</option>)}</select>
-              <span className="ml-auto self-center text-xs text-slate-400">{filas.length}</span>
-            </div>
-            <div className="overflow-auto max-h-[58vh]">
-              <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white"><tr><th className="text-left py-2">Tercero</th><th>Cat</th><th className="text-right">CO</th><th className="text-right">ES</th><th className="text-right">Dif</th><th></th></tr></thead>
-                <tbody>
-                  {filas.map((f, i) => (
-                    <tr key={f.nit + f.tipo + i} className={`border-t border-slate-100 hover:bg-slate-50 ${sel === f.nit ? "bg-blue-50" : ""}`}>
-                      <td className="py-1.5 max-w-[150px] truncate" title={f.nombre}>
-                        {f.nombre || "—"}
-                        {f.matched_por === "nombre" && <span className="ml-1 text-[9px] px-1 rounded bg-indigo-100 text-indigo-700" title="Cruzado por nombre (sin NIT común)">↔ nombre</span>}
-                      </td>
-                      <td><CatBadge cat={f.categoria} /></td>
-                      <td className="text-right tabular-nums">{fmtCOP(f.saldo_co)}</td>
-                      <td className="text-right tabular-nums">{fmtCOP(f.saldo_es)}</td>
-                      <td className={`text-right tabular-nums ${signo(f.diferencia)}`}>{fmtCOP(f.diferencia)}</td>
-                      <td>{f.nit && <button onClick={() => setSel(f.nit)} className="text-co text-xs hover:underline">Ver →</button>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+          <DataGrid gridId="arap-conciliacion" columnDefs={cols} rowData={data.filas} height="calc(100vh - 300px)"
+            onRowClicked={(d) => d?.nit && setSel(d.nit)}
+            getRowClass={(p) => (p.data?.nit && p.data.nit === sel ? "ag-row-sel" : undefined)} />
         )}
       </DataState>
     </Card>
