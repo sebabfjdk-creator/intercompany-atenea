@@ -85,6 +85,24 @@ def test_comparativa_detalle_grupo(client):
         assert det["total_es"].get(periodo, 0) == celda["es"]
 
 
+def test_movimientos_cuenta_pyg(client):
+    # tomar un grupo con cuentas ES y bajar al nivel de transacción
+    comp = client.get("/api/comparativa").json()
+    det = None
+    for f in comp["filas"]:
+        d = client.get("/api/comparativa/detalle-grupo", params={"grupo": f["grupo"]}).json()
+        if d.get("espana"):
+            det = d
+            break
+    assert det, "no se encontró grupo con cuentas ES"
+    cuenta = det["espana"][0]["cuenta"]
+    mov = client.get("/api/comparativa/movimientos-cuenta", params={"pais": "ES", "cuenta": cuenta}).json()
+    assert "items" in mov
+    if mov["items"]:
+        m = mov["items"][0]
+        assert set(m) >= {"fecha", "concepto", "debe", "haber", "cuenta"}
+
+
 def test_terceros_y_excepciones(client):
     t = client.get("/api/terceros").json()
     assert t["kpis"]["total"] > 1500

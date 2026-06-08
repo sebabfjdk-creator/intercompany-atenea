@@ -104,6 +104,27 @@ def homologacion(db: Session) -> dict:
     return config_service.get_homologacion(db)
 
 
+def movimientos_cuenta(db: Session, pais: str, cuenta: str, periodo: str | None = None) -> dict:
+    """Transacciones individuales de una cuenta (trazabilidad Grupo→Cuenta→Transacción).
+    Match por prefijo: cubre cuentas jerárquicas CO (510570 -> 51057001) y wildcard ES."""
+    from db.models import PygMovimiento
+    pref = cuenta[:-1] if (cuenta and cuenta[-1] in ("x", "X", "*")) else cuenta
+    q = select(PygMovimiento).where(PygMovimiento.pais == pais, PygMovimiento.codigo.startswith(pref))
+    if periodo:
+        q = q.where(PygMovimiento.periodo == periodo)
+    movs = db.scalars(q.order_by(PygMovimiento.fecha)).all()
+    items = [{
+        "cuenta": m.codigo, "periodo": m.periodo,
+        "fecha": m.fecha.isoformat() if m.fecha else None,
+        "concepto": m.concepto, "debe": float(m.debe), "haber": float(m.haber),
+    } for m in movs]
+    return {
+        "pais": pais, "cuenta": cuenta, "periodo": periodo, "items": items,
+        "total_debe": round(sum(i["debe"] for i in items), 2),
+        "total_haber": round(sum(i["haber"] for i in items), 2),
+    }
+
+
 def detalle_grupo(db: Session, grupo: str) -> dict:
     """Cuentas CO y ES que componen un grupo, con su valor por periodo (drill-down)."""
     from domain.reconciliacion import valor_periodo

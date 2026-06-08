@@ -293,6 +293,23 @@ class AppConfig(Base):
     valor: Mapped[str] = mapped_column(String(120), default="")
 
 
+class PygMovimiento(Base):
+    """Movimientos individuales PYG por cuenta (trazabilidad Grupo→Cuenta→Transacción).
+    ES desde el Libro Mayor DELSOL; CO desde las hojas Mvto_* de Siesa.
+    """
+    __tablename__ = "pyg_movimiento"
+    __table_args__ = (Index("ix_pygmov_pais_cod_per", "pais", "codigo", "periodo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pais: Mapped[str] = mapped_column(String(2), index=True)
+    codigo: Mapped[str] = mapped_column(String(40), index=True)
+    periodo: Mapped[str] = mapped_column(String(10))
+    fecha: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    concepto: Mapped[str] = mapped_column(Text, default="")
+    debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+
+
 class ArApMovimiento(Base):
     """Movimientos individuales AR/AP por tercero (para detalle 'Ver más' y filtros de fecha)."""
     __tablename__ = "arap_movimiento"

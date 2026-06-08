@@ -49,6 +49,12 @@ def detalle_grupo(grupo: str, db: Session = Depends(get_db), _: User = Depends(g
     return queries.detalle_grupo(db, grupo)
 
 
+@router.get("/comparativa/movimientos-cuenta")
+def movimientos_cuenta(pais: str, cuenta: str, periodo: str | None = None,
+                       db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return queries.movimientos_cuenta(db, pais, cuenta, periodo)
+
+
 @router.get("/comparativa")
 def comparativa(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return queries.comparativa(db)

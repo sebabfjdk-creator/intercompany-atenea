@@ -23,10 +23,11 @@ from db.models import (
     AccountMapping,
     AccountPeriod,
     ImportBatch,
+    PygMovimiento,
     SourceSystem,
     TerceroBridge,
 )
-from ingestion.colombia import parse_colombia_balance
+from ingestion.colombia import parse_colombia_balance, parse_colombia_movimientos
 from ingestion.espana import parse_espana_movimientos
 from ingestion.homologacion import load_homologacion
 from ingestion.terceros import load_puente_terceros
@@ -39,6 +40,10 @@ _ES_SHEETS = {
 _CO_SHEETS = {
     "Balance_Enero": "2026-01",
     "Balance_Febrero-Marzo": "2026-02-03",
+}
+_CO_MVTO_SHEETS = {
+    "Mvto_Enero": "2026-01",
+    "Mvto_Febrero-Marzo": "2026-02-03",
 }
 
 
@@ -77,6 +82,7 @@ def _match_sheet(disponibles: list[str], mapa: dict[str, str]) -> dict[str, str]
 def ingest_espana(db: Session, path: str) -> dict:
     sis = _ensure_system(db, "DELSOL", "ES", "delsol_mayor")
     db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "ES"))
+    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "ES"))
     matched = _match_sheet(_sheets(path), _ES_SHEETS)
     if not matched:
         raise ValueError(f"No se reconocieron hojas de España. Hojas: {_sheets(path)}")
@@ -90,6 +96,11 @@ def ingest_espana(db: Session, path: str) -> dict:
             for m in c.movimientos:
                 a["debe"] += m.debe
                 a["haber"] += m.haber
+            # movimientos individuales PYG (clase 6 gasto / 7 ingreso)
+            if c.codigo[:1] in ("6", "7"):
+                for m in c.movimientos:
+                    db.add(PygMovimiento(pais="ES", codigo=c.codigo, periodo=periodo, fecha=m.fecha,
+                                         concepto=str(m.concepto)[:500], debe=round(m.debe, 2), haber=round(m.haber, 2)))
         for codigo, a in agg.items():
             db.add(AccountPeriod(
                 pais="ES", codigo=codigo, nombre=a["nombre"][:255], periodo=periodo,
@@ -104,6 +115,7 @@ def ingest_espana(db: Session, path: str) -> dict:
 def ingest_colombia(db: Session, path: str) -> dict:
     sis = _ensure_system(db, "Siesa", "CO", "siesa_xlsx")
     db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO"))
+    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "CO"))
     matched = _match_sheet(_sheets(path), _CO_SHEETS)
     if not matched:
         raise ValueError(f"No se reconocieron hojas de Colombia. Hojas: {_sheets(path)}")
@@ -116,9 +128,21 @@ def ingest_colombia(db: Session, path: str) -> dict:
                 debe=round(c.debitos, 2), haber=round(c.creditos, 2),
             ))
             n += 1
+    # movimientos individuales PYG (clase 4 ingreso / 5 gasto) desde hojas Mvto_*
+    nmov = 0
+    for sheet, periodo in _match_sheet(_sheets(path), _CO_MVTO_SHEETS).items():
+        for m in parse_colombia_movimientos(path, sheet, solo_detalle=True):
+            if m.cuenta[:1] not in ("4", "5"):
+                continue
+            concepto = (m.nombre_tercero or m.nombre_cuenta or "")
+            if m.referencia:
+                concepto = f"{concepto} · {m.referencia}".strip(" ·")
+            db.add(PygMovimiento(pais="CO", codigo=m.cuenta, periodo=periodo, fecha=m.fecha,
+                                 concepto=concepto[:500], debe=round(m.debito, 2), haber=round(m.credito, 2)))
+            nmov += 1
     _record_batch(db, sis.id, _hash_file(path), n)
     db.commit()
-    return {"tipo": "colombia", "periodos": sorted(set(matched.values())), "cuentas": n}
+    return {"tipo": "colombia", "periodos": sorted(set(matched.values())), "cuentas": n, "movimientos": nmov}
 
 
 def ingest_homologacion(db: Session, path: str) -> dict:
