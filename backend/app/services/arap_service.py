@@ -25,8 +25,21 @@ from ingestion.arap import (
     parse_arap_espana,
     tipo_documento,
 )
+from ingestion.utils import limpiar_concepto
 
 settings = get_settings()
+
+# Formas legales a ignorar al normalizar razones sociales para el cruce por nombre
+_LEGAL = {"SAS", "SA", "SLU", "SL", "LTDA", "LTD", "ESP", "EU", "INC", "LLC", "CIA", "SUCURSAL"}
+
+
+def _norm_nombre(nombre: str) -> str:
+    """Razón social normalizada para cruce CO<->ES: sin acentos/puntuación,
+    sin formas legales (SAS/SLU/SL/LTDA…) ni letras sueltas."""
+    base = limpiar_concepto(nombre)  # MAYÚSCULAS, sin acentos ni signos
+    toks = [t for t in base.split() if len(t) > 1 and t not in _LEGAL]
+    norm = " ".join(toks).strip()
+    return norm if len(norm) >= 5 else ""  # evita matches por nombres demasiado cortos
 
 
 def _sheets(path: str) -> list[str]:
@@ -162,40 +175,50 @@ def reconciliacion(db: Session, tipo: str | None = None, desde=None, hasta=None)
     umbral, _ = config_service.get_tolerancia(db)
     sumas = _sumas_mov(db, desde, hasta)
     rows = db.scalars(select(ArApBalance).where(ArApBalance.es_provisional.is_(False))).all()
-    # indexar por (tipo, nit)
-    co_idx: dict[tuple, ArApBalance] = {}
-    es_idx: dict[tuple, ArApBalance] = {}
-    for r in rows:
-        if not r.nit:
-            es_idx[(r.tipo, f"ES:{r.cuenta}")] = r  # ES sin NIT resuelto
-            continue
-        (co_idx if r.pais == "CO" else es_idx)[(r.tipo, r.nit)] = r
 
-    claves = set(co_idx) | set(es_idx)
-    out = []
-    for k in claves:
-        tp, nit = k
-        if tipo and tp != tipo:
-            continue
-        c = co_idx.get(k)
-        e = es_idx.get(k)
+    co_rows = [r for r in rows if r.pais == "CO"]
+    es_rows = [r for r in rows if r.pais == "ES"]
+    co_by_nit = {(r.tipo, r.nit): r for r in co_rows if r.nit}
+    co_by_nombre = {(r.tipo, _norm_nombre(r.nombre)): r for r in co_rows if r.nombre}
+    co_usados: set[int] = set()
+
+    def fila(c, e, tp, matched_por):
         saldo_co = float(c.saldo) if c else 0.0
         saldo_es = float(e.saldo) if e else 0.0
         error_co = bool(c.error_contab) if c else False
         estado = _estado(saldo_co, saldo_es, c is not None, e is not None, error_co, umbral)
-        nit_real = nit if not str(nit).startswith("ES:") else ""
+        nit_real = (c.nit if c else "") or (e.nit if e else "")
         co_deb, co_hab = sumas.get(("CO", tp, nit_real), (0.0, 0.0)) if nit_real else (0.0, 0.0)
         es_deb, es_hab = sumas.get(("ES", tp, nit_real), (0.0, 0.0)) if nit_real else (0.0, 0.0)
-        out.append({
+        return {
             "tipo": tp, "categoria": "CLIENTE" if tp == "AR" else "PROVEEDOR",
-            "nit": nit_real,
-            "nombre": (c.nombre if c else None) or (e.nombre if e else ""),
+            "nit": nit_real, "nombre": (c.nombre if c else None) or (e.nombre if e else ""),
             "saldo_co": round(saldo_co, 2), "saldo_es": round(saldo_es, 2),
             "saldo_1305": float(c.saldo_a) if c else None, "saldo_2805": float(c.saldo_b) if c else None,
             "debitos_mes": round(co_deb + es_deb, 2), "creditos_mes": round(co_hab + es_hab, 2),
             "diferencia": round(saldo_co - saldo_es, 2),
-            "estado": estado, "error_contab": error_co,
-        })
+            "estado": estado, "error_contab": error_co, "matched_por": matched_por,
+        }
+
+    out = []
+    for e in es_rows:
+        if tipo and e.tipo != tipo:
+            continue
+        c = co_by_nit.get((e.tipo, e.nit)) if e.nit else None
+        matched = "nit" if c else None
+        if c is None:  # fallback: cruce por nombre (entidades ES con NIF de letra, sin NIT CO)
+            c = co_by_nombre.get((e.tipo, _norm_nombre(e.nombre)))
+            matched = "nombre" if c else None
+        if c is not None:
+            co_usados.add(id(c))
+        out.append(fila(c, e, e.tipo, matched))
+    # CO sin contraparte
+    for c in co_rows:
+        if tipo and c.tipo != tipo:
+            continue
+        if id(c) in co_usados:
+            continue
+        out.append(fila(c, None, c.tipo, None))
     out.sort(key=lambda x: abs(x["diferencia"]), reverse=True)
 
     def _tot(rows):

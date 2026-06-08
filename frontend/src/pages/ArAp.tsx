@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
+import { descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
 import { fmtCOP } from "../lib/format";
 import { fmtFecha } from "../lib/daterange";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
 
-interface Fila { tipo: string; categoria: string; nit: string; nombre: string; saldo_co: number; saldo_es: number; diferencia: number; estado: string; error_contab: boolean }
+interface Fila { tipo: string; categoria: string; nit: string; nombre: string; saldo_co: number; saldo_es: number; diferencia: number; estado: string; error_contab: boolean; matched_por?: string | null }
 interface TotCat { debitos: number; creditos: number; saldo_neto: number }
 interface Comp { filas: Fila[]; totales: Record<string, TotCat> }
 
@@ -30,7 +31,8 @@ export default function ArAp() {
   function verTercero(nit: string) { setSelNit(nit); setTab(0); }
   return (
     <div>
-      <PageHeader title="AR/AP — Trazabilidad por tercero" subtitle="Del saldo al asiento: documento, tipo, línea de tiempo y matching CO↔ES" />
+      <PageHeader title="AR/AP — Trazabilidad por tercero" subtitle="Del saldo al asiento: documento, tipo, línea de tiempo y matching CO↔ES"
+        action={<button onClick={() => descargarArchivo("/api/ar-ap/export", "ar-ap.xlsx")} className="px-3 py-1.5 text-sm border rounded text-slate-600">⬇️ Excel</button>} />
       <div className="flex gap-2 mb-4 border-b border-slate-200">
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)} className={`px-4 py-2 text-sm -mb-px border-b-2 ${tab === i ? "border-co text-co font-medium" : "border-transparent text-slate-500"}`}>{t}</button>
@@ -78,7 +80,10 @@ function Conciliacion({ sel, setSel }: { sel: string | null; setSel: (n: string 
                 <tbody>
                   {filas.map((f, i) => (
                     <tr key={f.nit + f.tipo + i} className={`border-t border-slate-100 hover:bg-slate-50 ${sel === f.nit ? "bg-blue-50" : ""}`}>
-                      <td className="py-1.5 max-w-[150px] truncate" title={f.nombre}>{f.nombre || "—"}</td>
+                      <td className="py-1.5 max-w-[150px] truncate" title={f.nombre}>
+                        {f.nombre || "—"}
+                        {f.matched_por === "nombre" && <span className="ml-1 text-[9px] px-1 rounded bg-indigo-100 text-indigo-700" title="Cruzado por nombre (sin NIT común)">↔ nombre</span>}
+                      </td>
                       <td><CatBadge cat={f.categoria} /></td>
                       <td className="text-right tabular-nums">{fmtCOP(f.saldo_co)}</td>
                       <td className="text-right tabular-nums">{fmtCOP(f.saldo_es)}</td>

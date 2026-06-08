@@ -112,6 +112,13 @@ def test_tercero_360(db):
         assert set(todos[0]) >= {"documento", "tipo_documento", "saldo", "debe", "haber"}
 
 
+def test_cruce_por_nombre(db):
+    # entidades ES con NIF de letra (sin NIT CO) deben cruzar por nombre
+    filas = svc.reconciliacion(db)["filas"]
+    assert any(f.get("matched_por") == "nombre" for f in filas), "no hubo ningún cruce por nombre"
+    assert all("matched_por" in f for f in filas)
+
+
 def test_kpis_arap(db):
     k = svc.kpis_arap(db)
     assert set(k) >= {"diferencias_abiertas", "diferencias_conciliadas", "mayores_90_dias", "top_terceros", "top_cuentas"}

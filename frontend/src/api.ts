@@ -23,3 +23,16 @@ api.interceptors.response.use(
 );
 
 export const API_BASE = baseURL;
+
+// Descarga un archivo de un endpoint protegido (envía el Bearer token).
+export async function descargarArchivo(url: string, filename: string) {
+  const r = await api.get(url, { responseType: "blob" });
+  const blobUrl = URL.createObjectURL(r.data as Blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}

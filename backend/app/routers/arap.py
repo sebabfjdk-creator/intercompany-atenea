@@ -87,6 +87,28 @@ def kpis(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return svc.kpis_arap(db)
 
 
+@router.get("/ar-ap/export")
+def export_arap(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    import io
+
+    import openpyxl
+    from fastapi.responses import StreamingResponse
+    data = svc.reconciliacion(db)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "AR-AP"
+    ws.append(["Tercero", "NIT", "Categoría", "Saldo CO", "Saldo ES", "Diferencia", "Estado", "Cruce"])
+    for f in data["filas"]:
+        ws.append([f["nombre"], f["nit"], f["categoria"], f["saldo_co"], f["saldo_es"],
+                   f["diferencia"], f["estado"], f.get("matched_por") or ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=ar-ap.xlsx"})
+
+
 @router.get("/ar-ap/excepciones")
 def excepciones(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return svc.excepciones(db)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, API_BASE } from "../api";
+import { api, descargarArchivo } from "../api";
 import { useFetch, rol } from "../lib/useFetch";
 import { fmtCOP, fmtPct } from "../lib/format";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
@@ -91,7 +91,7 @@ export default function Config() {
       <PageHeader title="Configuración" subtitle="Homologación de cuentas y umbrales de tolerancia"
         action={puedeEditar && !editing && data ? (
           <div className="flex gap-2">
-            <a href={`${API_BASE}/api/config/homologacion/export`} className="px-3 py-2 text-sm border rounded text-slate-600">⬇️ Exportar</a>
+            <button onClick={() => descargarArchivo("/api/config/homologacion/export", "homologacion.xlsx")} className="px-3 py-2 text-sm border rounded text-slate-600">⬇️ Exportar</button>
             <button onClick={startEdit} className="px-3 py-2 text-sm bg-co text-white rounded">✏️ Editar homologación</button>
           </div>
         ) : null} />

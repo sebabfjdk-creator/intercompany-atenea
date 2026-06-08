@@ -44,6 +44,36 @@ def estado_datos(db: Session = Depends(get_db), _: User = Depends(get_current_us
     return queries.estado_datos(db)
 
 
+def _xlsx_response(wb, filename: str):
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@router.get("/comparativa/export")
+def export_comparativa(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    import openpyxl
+    data = queries.comparativa(db)
+    periodos = data["periodos"]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Comparativa"
+    header = ["Grupo", "Tipo"]
+    for p in periodos:
+        header += [f"{p} CO", f"{p} ES", f"{p} Dif", f"{p} Estado"]
+    ws.append(header)
+    for f in data["filas"]:
+        row = [f["grupo"], f["tipo"]]
+        for p in periodos:
+            c = f["celdas"].get(p, {})
+            row += [c.get("co", 0), c.get("es", 0), c.get("dif", 0), c.get("estado", "")]
+        ws.append(row)
+    return _xlsx_response(wb, "comparativa.xlsx")
+
+
 @router.get("/comparativa/detalle-grupo")
 def detalle_grupo(grupo: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return queries.detalle_grupo(db, grupo)

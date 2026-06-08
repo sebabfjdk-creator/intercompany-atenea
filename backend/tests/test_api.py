@@ -181,6 +181,13 @@ def test_config_export(client):
     assert r.content[:2] == b"PK"  # xlsx es un zip
 
 
+def test_exports_excel(client):
+    for url in ("/api/comparativa/export", "/api/ar-ap/export"):
+        r = client.get(url)
+        assert r.status_code == 200, url
+        assert r.content[:2] == b"PK"
+
+
 def test_role_admin_co_no_sube_espana(client):
     token_co = create_access_token("colombia@atenea.com", "admin_co")
     r = client.post("/api/ingest/espana", headers={"Authorization": f"Bearer {token_co}"},

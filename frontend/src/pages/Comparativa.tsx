@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
 import { fmtCOP, periodoLabel } from "../lib/format";
 import { fmtFecha } from "../lib/daterange";
@@ -130,6 +130,7 @@ export default function Comparativa() {
           <div className="flex gap-2">
             <button onClick={expandirTodos} className="px-3 py-1.5 text-sm border rounded text-slate-600">Expandir todos</button>
             <button onClick={() => setExp(new Set())} className="px-3 py-1.5 text-sm border rounded text-slate-600">Contraer todos</button>
+            <button onClick={() => descargarArchivo("/api/comparativa/export", "comparativa.xlsx")} className="px-3 py-1.5 text-sm border rounded text-slate-600">⬇️ Excel</button>
           </div>
         ) : null} />
       <DataState loading={loading} error={error} empty={empty} onRetry={reload}>
