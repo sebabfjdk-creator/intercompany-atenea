@@ -237,8 +237,25 @@ def test_anomalias(client):
     r = client.get("/api/anomalias")
     assert r.status_code == 200
     d = r.json()
-    assert set(d) >= {"sin_homologar", "grupos_atipicos", "kpis"}
+    assert set(d) >= {"sin_homologar", "grupos_atipicos", "multiples_grupos", "kpis"}
     assert isinstance(d["sin_homologar"], list) and isinstance(d["grupos_atipicos"], list)
+
+
+def test_conflictos_multiples_grupos():
+    """Detección de cuentas en >1 grupo: exacto y por wildcard que pisa otro grupo."""
+    from app.services import config_service
+    items_es = [
+        ("642.0.0.x", "EPS"),          # wildcard amplio
+        ("642.0.0.300", "Cajas"),      # cubierto por el wildcard de EPS
+        ("640.0.0.200", "Bonificaciones"),
+        ("640.0.0.200", "Comisiones"), # duplicado exacto
+        ("700.0.0.001", "Solo uno"),   # limpio
+    ]
+    conf = config_service._conflictos_lado(items_es)
+    by = {c["codigo"]: set(c["grupos"]) for c in conf}
+    assert by.get("642.0.0.300") == {"EPS", "Cajas"}        # wildcard pisa exacto
+    assert by.get("640.0.0.200") == {"Bonificaciones", "Comisiones"}  # exacto duplicado
+    assert "700.0.0.001" not in by                           # limpio, no conflicto
 
 
 def test_exports_excel(client):

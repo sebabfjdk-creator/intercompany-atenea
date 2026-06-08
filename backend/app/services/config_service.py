@@ -89,6 +89,39 @@ def get_homologacion(db: Session) -> dict:
     }
 
 
+def _conflictos_lado(items: list[tuple[str, str]]) -> list[dict]:
+    """Dado [(codigo, grupo)], detecta códigos asignados a >1 grupo:
+    por código exacto duplicado y por wildcard ('642.0.0.x') que cubre el
+    código exacto (o el wildcard) de otro grupo. Análisis de declaración
+    (no necesita saldos)."""
+    exactos = [(c, g) for c, g in items if c and c[-1] not in ("x", "X", "*")]
+    wilds = [(c[:-1], c, g) for c, g in items if c and c[-1] in ("x", "X", "*")]
+    conf: dict[str, set[str]] = defaultdict(set)
+    by_code: dict[str, set[str]] = defaultdict(set)
+    for c, g in exactos:
+        by_code[c].add(g)
+    for c, gs in by_code.items():
+        if len(gs) > 1:
+            conf[c] |= gs
+    for pref, wc, gw in wilds:
+        for c, ge in exactos:                       # wildcard cubre un código exacto de otro grupo
+            if pref and c.startswith(pref) and ge != gw:
+                conf[c] |= {gw, ge}
+        for pref2, wc2, gw2 in wilds:               # wildcard vs wildcard solapados
+            if gw != gw2 and pref and pref2 and (pref.startswith(pref2) or pref2.startswith(pref)):
+                conf[wc] |= {gw, gw2}
+    return [{"codigo": k, "grupos": sorted(v)} for k, v in sorted(conf.items(), key=lambda x: -len(x[1]))]
+
+
+def cuentas_multiples_grupos(db: Session) -> dict:
+    """Reporte de auditoría: cuentas homologadas en más de un grupo (CO y ES).
+    Viola la regla 'una cuenta = un solo grupo' y causa doble conteo en Comparativa."""
+    grupos = grupos_homologados(db)
+    co = _conflictos_lado([(c, g.grupo) for g in grupos for c in g.cuentas_co])
+    es = _conflictos_lado([(c, g.grupo) for g in grupos for c in g.cuentas_es])
+    return {"colombia": co, "espana": es, "total": len(co) + len(es)}
+
+
 def _grupo_sets(db: Session, nombre: str) -> tuple[set[str], set[str]]:
     co: set[str] = set()
     es: set[str] = set()

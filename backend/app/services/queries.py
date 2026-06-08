@@ -169,13 +169,16 @@ def anomalias(db: Session, z_umbral: float = 2.0) -> dict:
     grupos_atipicos.sort(key=lambda x: x["z"], reverse=True)
 
     periodos = sorted({f.periodo for f in filas})
+    multiples = config_service.cuentas_multiples_grupos(db)
     return {
         "sin_homologar": sin_homologar,
         "grupos_atipicos": grupos_atipicos,
+        "multiples_grupos": multiples,
         "periodos": periodos,
         "nota_zscore": ("z-score transversal sobre grupos" if len(periodos) < 3
                         else "z-score temporal disponible"),
-        "kpis": {"sin_homologar": len(sin_homologar), "grupos_atipicos": len(grupos_atipicos)},
+        "kpis": {"sin_homologar": len(sin_homologar), "grupos_atipicos": len(grupos_atipicos),
+                 "multiples_grupos": multiples["total"]},
     }
 
 

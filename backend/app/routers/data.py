@@ -170,6 +170,12 @@ class MoverCuentaIn(BaseModel):
     grupo_destino: str
 
 
+@router.get("/config/conflictos")
+def conflictos_homologacion(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Cuentas homologadas en más de un grupo (exacto o por wildcard) — doble conteo."""
+    return config_service.cuentas_multiples_grupos(db)
+
+
 @router.post("/config/homologacion/mover")
 def mover_cuenta(body: MoverCuentaIn, db: Session = Depends(get_db), user: User = Depends(require_editor)):
     """Drag & drop: mueve una cuenta de un grupo a otro. Auto-guardado + auditoría."""

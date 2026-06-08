@@ -4,7 +4,9 @@ import { PageHeader, Card, DataState, Kpi } from "../components/ui";
 
 interface Grupo { grupo: string; tipo: string; diferencia: number; z: number }
 interface Cuenta { pais: string; codigo: string; nombre: string; valor: number }
-interface Resp { sin_homologar: Cuenta[]; grupos_atipicos: Grupo[]; periodos: string[]; nota_zscore: string; kpis: { sin_homologar: number; grupos_atipicos: number } }
+interface Conflicto { codigo: string; grupos: string[] }
+interface Multiples { colombia: Conflicto[]; espana: Conflicto[]; total: number }
+interface Resp { sin_homologar: Cuenta[]; grupos_atipicos: Grupo[]; multiples_grupos: Multiples; periodos: string[]; nota_zscore: string; kpis: { sin_homologar: number; grupos_atipicos: number; multiples_grupos: number } }
 
 export default function Anomalias() {
   const { data, loading, error, reload } = useFetch<Resp>("/api/anomalias");
@@ -14,11 +16,45 @@ export default function Anomalias() {
       <DataState loading={loading} error={error} onRetry={reload}>
         {data && (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <Kpi label="Cuentas sin homologar" value={data.kpis.sin_homologar} tone="amber" hint="con movimiento PYG" />
               <Kpi label="Grupos atípicos" value={data.kpis.grupos_atipicos} tone="red" hint="z-score ≥ 2" />
+              <Kpi label="Cuentas en >1 grupo" value={data.kpis.multiples_grupos} tone="red" hint="doble conteo" />
               <Kpi label="Periodos analizados" value={data.periodos.length} hint={data.nota_zscore} />
             </div>
+
+            {data.multiples_grupos.total > 0 && (
+              <Card title="⚠️ Cuentas homologadas en más de un grupo (doble conteo)" className="mb-4">
+                <p className="text-xs text-slate-500 mb-3">
+                  Cada cuenta debe pertenecer a <b>un solo grupo</b>. Estas aparecen en varios (por código exacto
+                  o porque un <b>wildcard</b> de un grupo cubre cuentas de otro), inflando los totales de Comparativa.
+                </p>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {(["espana", "colombia"] as const).map((lado) => (
+                    <div key={lado}>
+                      <div className={`text-xs font-semibold uppercase mb-1 ${lado === "espana" ? "text-es" : "text-co"}`}>
+                        {lado === "espana" ? "España" : "Colombia"} ({data.multiples_grupos[lado].length})
+                      </div>
+                      {data.multiples_grupos[lado].length === 0 ? (
+                        <p className="text-sm text-emerald-600">Sin conflictos. ✓</p>
+                      ) : (
+                        <div className="overflow-auto max-h-[40vh]">
+                          <table className="w-full text-sm">
+                            <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white"><tr><th className="text-left py-1">Cuenta</th><th className="text-left">Grupos</th></tr></thead>
+                            <tbody>{data.multiples_grupos[lado].map((c, i) => (
+                              <tr key={i} className="border-t border-slate-100 align-top">
+                                <td className="py-1.5 font-mono text-xs whitespace-nowrap">{c.codigo}</td>
+                                <td className="text-xs">{c.grupos.join(" · ")}</td>
+                              </tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
             <div className="grid md:grid-cols-2 gap-4">
               <Card title="Grupos con diferencia atípica (z-score)">
                 {data.grupos_atipicos.length === 0 ? (
