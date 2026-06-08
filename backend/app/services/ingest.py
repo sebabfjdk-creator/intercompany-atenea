@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
 
 import openpyxl
 from sqlalchemy import delete, select
@@ -22,6 +24,7 @@ from sqlalchemy.orm import Session
 from db.models import (
     AccountMapping,
     AccountPeriod,
+    FileUpload,
     ImportBatch,
     PygMovimiento,
     SourceSystem,
@@ -81,11 +84,13 @@ def _match_sheet(disponibles: list[str], mapa: dict[str, str]) -> dict[str, str]
 
 def ingest_espana(db: Session, path: str) -> dict:
     sis = _ensure_system(db, "DELSOL", "ES", "delsol_mayor")
-    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "ES"))
-    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "ES"))
     matched = _match_sheet(_sheets(path), _ES_SHEETS)
     if not matched:
         raise ValueError(f"No se reconocieron hojas de España. Hojas: {_sheets(path)}")
+    # Borrado quirúrgico: solo los periodos presentes en este archivo (no todo el país).
+    periodos = list(set(matched.values()))
+    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "ES", AccountPeriod.periodo.in_(periodos)))
+    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "ES", PygMovimiento.periodo.in_(periodos)))
     n = 0
     for sheet, periodo in matched.items():
         cuentas = parse_espana_movimientos(path, sheet)
@@ -114,11 +119,14 @@ def ingest_espana(db: Session, path: str) -> dict:
 
 def ingest_colombia(db: Session, path: str) -> dict:
     sis = _ensure_system(db, "Siesa", "CO", "siesa_xlsx")
-    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO"))
-    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "CO"))
     matched = _match_sheet(_sheets(path), _CO_SHEETS)
     if not matched:
         raise ValueError(f"No se reconocieron hojas de Colombia. Hojas: {_sheets(path)}")
+    matched_mvto = _match_sheet(_sheets(path), _CO_MVTO_SHEETS)
+    # Borrado quirúrgico: solo los periodos presentes (balance + movimientos), no todo el país.
+    periodos = list(set(matched.values()) | set(matched_mvto.values()))
+    db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO", AccountPeriod.periodo.in_(periodos)))
+    db.execute(delete(PygMovimiento).where(PygMovimiento.pais == "CO", PygMovimiento.periodo.in_(periodos)))
     n = 0
     for sheet, periodo in matched.items():
         for c in parse_colombia_balance(path, sheet):
@@ -132,7 +140,7 @@ def ingest_colombia(db: Session, path: str) -> dict:
     # En Siesa las cuentas PYG NO traen 'Referencia' (no son filas de detalle), vienen
     # por tercero. Enero es arrastre (débito/crédito = 0); Feb-Marzo trae movimiento real.
     nmov = 0
-    for sheet, periodo in _match_sheet(_sheets(path), _CO_MVTO_SHEETS).items():
+    for sheet, periodo in matched_mvto.items():
         for m in parse_colombia_movimientos(path, sheet, solo_detalle=False):
             if m.cuenta[:1] not in ("4", "5") or not m.nit:
                 continue
@@ -199,6 +207,39 @@ def _record_batch(db: Session, sistema_id: int, file_hash: str, n: int) -> None:
     if existe:
         return
     db.add(ImportBatch(sistema_id=sistema_id, periodo_mes="2026-Q1", archivo_hash=h, estado="cargado"))
+
+
+def registrar_carga(db: Session, *, tipo: str, nombre_original: str, path: str,
+                    resultado: dict, usuario_id: int | None) -> None:
+    """Registra una carga en `file_upload` (historial/auditoría de ingesta).
+
+    Marca como 'reemplazado' las cargas previas activas del mismo tipo+periodo.
+    No almacena el binario, solo metadatos + hash sha256.
+    """
+    file_hash = _hash_file(path)[:64]
+    periodos = resultado.get("periodos") or ([resultado["periodo"]] if resultado.get("periodo") else [])
+    periodo = ",".join(periodos)
+    registros = int(
+        resultado.get("cuentas")
+        or resultado.get("terceros")
+        or resultado.get("mappings")
+        or (resultado.get("ar_terceros", 0) + resultado.get("ap_terceros", 0))
+        or 0
+    )
+    prev = db.scalars(select(FileUpload).where(
+        FileUpload.tipo_archivo == tipo,
+        FileUpload.periodo == periodo,
+        FileUpload.estado == "cargado",
+    )).all()
+    for p in prev:
+        p.estado = "reemplazado"
+        p.fecha_actualizacion = datetime.now(timezone.utc)
+    db.add(FileUpload(
+        tipo_archivo=tipo, nombre_original=(nombre_original or "")[:255],
+        nombre_interno=uuid.uuid4().hex, periodo=periodo, usuario_id=usuario_id,
+        registros_insertados=registros, hash_archivo=file_hash, estado="cargado",
+    ))
+    db.commit()
 
 
 INGESTORS = {

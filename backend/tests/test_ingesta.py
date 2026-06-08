@@ -1,0 +1,60 @@
+"""Fase 0+1 del módulo de ingesta:
+- Borrado QUIRÚRGICO por periodo (no por país) -> no se pierde otro periodo.
+- Historial de cargas (FileUpload): registro + marca de reemplazo.
+"""
+import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import sessionmaker
+
+from app.services import ingest as ingest_svc
+from db.base import Base
+from db.models import AccountPeriod, FileUpload
+
+
+def _session(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path/'i.sqlite'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
+
+
+def test_borrado_por_periodo_no_pierde_otro_periodo(tmp_path, f_espana):
+    if not f_espana.exists():
+        pytest.skip("falta espana_delsol.xlsx")
+    S = _session(tmp_path)
+    with S() as db:
+        ingest_svc.ingest_espana(db, str(f_espana))
+        n1 = db.scalar(select(func.count()).select_from(AccountPeriod).where(AccountPeriod.pais == "ES"))
+        # centinela: un periodo que NO está en el archivo (no debe borrarse al recargar)
+        db.add(AccountPeriod(pais="ES", codigo="SENTINEL", periodo="2099-12", debe=1, haber=0))
+        db.commit()
+
+        ingest_svc.ingest_espana(db, str(f_espana))  # recarga: solo 2026-01 y 2026-02-03
+
+        # el centinela de 2099-12 SIGUE vivo (antes el delete borraba todo el país)
+        assert db.scalar(select(func.count()).select_from(AccountPeriod)
+                         .where(AccountPeriod.codigo == "SENTINEL")) == 1
+        # y no se duplicaron las cuentas reales (mismo conteo tras recargar)
+        n2 = db.scalar(select(func.count()).select_from(AccountPeriod)
+                       .where(AccountPeriod.pais == "ES", AccountPeriod.codigo != "SENTINEL"))
+        assert n2 == n1
+
+
+def test_registrar_carga_historial_y_reemplazo(tmp_path, f_espana):
+    if not f_espana.exists():
+        pytest.skip("falta espana_delsol.xlsx")
+    S = _session(tmp_path)
+    with S() as db:
+        res = ingest_svc.ingest_espana(db, str(f_espana))
+        ingest_svc.registrar_carga(db, tipo="espana", nombre_original="ene-mar.xlsx",
+                                   path=str(f_espana), resultado=res, usuario_id=None)
+        ingest_svc.registrar_carga(db, tipo="espana", nombre_original="ene-mar-v2.xlsx",
+                                   path=str(f_espana), resultado=res, usuario_id=None)
+
+        cargas = db.scalars(select(FileUpload).where(FileUpload.tipo_archivo == "espana")
+                            .order_by(FileUpload.id)).all()
+        assert len(cargas) == 2
+        assert cargas[0].estado == "reemplazado"   # la primera quedó sustituida
+        assert cargas[1].estado == "cargado"        # la última es la activa
+        assert cargas[1].registros_insertados == res["cuentas"]
+        assert set(cargas[1].periodo.split(",")) == set(res["periodos"])
+        assert len(cargas[1].hash_archivo) == 64

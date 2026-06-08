@@ -1,11 +1,18 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { ColDef } from "ag-grid-community";
 import { api } from "../api";
 import { useFetch, rol } from "../lib/useFetch";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
+import DataGrid from "../components/DataGrid";
 
 interface Estado {
   colombia_cuentas: number; espana_cuentas: number; homologacion_mappings: number;
   terceros: number; periodos: string[]; listo_para_comparativa: boolean;
+}
+
+interface Carga {
+  id: number; tipo_label: string; archivo: string; periodo: string; usuario: string;
+  fecha: string | null; registros: number; estado: string; observaciones: string;
 }
 
 const TIPOS = [
@@ -52,7 +59,23 @@ function Uploader({ tipo, label, hint, disabled, onDone }: { tipo: string; label
 
 export default function Ingesta() {
   const est = useFetch<Estado>("/api/estado-datos");
+  const hist = useFetch<Carga[]>("/api/ingest/archivos");
   const esAdminCo = rol() === "admin_co";
+  const reloadAll = () => { est.reload(); hist.reload(); };
+
+  const cols = useMemo<ColDef[]>(() => [
+    { field: "tipo_label", headerName: "Tipo", width: 170, pinned: "left" },
+    { field: "archivo", headerName: "Archivo", minWidth: 220, tooltipField: "archivo" },
+    { field: "periodo", headerName: "Periodo", width: 130 },
+    { field: "usuario", headerName: "Usuario", width: 180 },
+    { field: "fecha", headerName: "Fecha", width: 170,
+      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleString("es-CO") : "—") },
+    { field: "registros", headerName: "Registros", width: 120, type: "rightAligned" },
+    { field: "estado", headerName: "Estado", width: 130,
+      cellClass: (p: any) => p.value === "cargado" ? "text-emerald-600 font-medium"
+        : p.value === "reemplazado" ? "text-slate-400" : "text-amber-600" },
+    { field: "observaciones", headerName: "Observaciones", minWidth: 180, tooltipField: "observaciones" },
+  ], []);
 
   return (
     <div>
@@ -68,16 +91,16 @@ export default function Ingesta() {
           <div className="grid md:grid-cols-2 gap-4">
             {TIPOS.map((t) => (
               <Uploader key={t.id} tipo={t.id} label={t.label} hint={t.hint}
-                disabled={esAdminCo && t.es} onDone={est.reload} />
+                disabled={esAdminCo && t.es} onDone={reloadAll} />
             ))}
           </div>
         </Card>
         <Card title="Cuentas por Cobrar y Pagar (AR/AP)" className="mt-4">
           <div className="grid md:grid-cols-2 gap-4">
             <Uploader tipo="ar-ap/colombia" label="Colombia AR/AP"
-              hint="Cartera/CXP Siesa (1305, 2805, 22xx)" disabled={false} onDone={est.reload} />
+              hint="Cartera/CXP Siesa (1305, 2805, 22xx)" disabled={false} onDone={reloadAll} />
             <Uploader tipo="ar-ap/espana" label="España AR/AP"
-              hint="Cartera/CXP DELSOL (430, 410)" disabled={esAdminCo} onDone={est.reload} />
+              hint="Cartera/CXP DELSOL (430, 410)" disabled={esAdminCo} onDone={reloadAll} />
           </div>
           <p className="text-xs text-slate-400 mt-3">
             Puedes subir el mismo archivo (CarteraYPasivos) en ambos slots: cada uno toma sus hojas
@@ -85,8 +108,18 @@ export default function Ingesta() {
           </p>
         </Card>
 
+        <Card title="Historial de cargas" className="mt-4">
+          {hist.data && hist.data.length > 0 ? (
+            <DataGrid gridId="ingesta-historial" columnDefs={cols} rowData={hist.data} pageSize={50} height="48vh" />
+          ) : (
+            <p className="text-sm text-slate-400">Aún no hay cargas registradas. Al subir un archivo aparecerá aquí con su periodo, usuario y fecha.</p>
+          )}
+        </Card>
+
         <p className="text-xs text-slate-400 mt-3">
           Los archivos no se almacenan: se parsean y se guardan solo las cifras agregadas por cuenta/periodo.
+          El historial registra qué se cargó, de qué periodo, quién y cuándo (una recarga del mismo
+          tipo y periodo marca la anterior como “reemplazado”).
         </p>
       </DataState>
     </div>

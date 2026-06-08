@@ -131,6 +131,32 @@ class ImportBatch(Base):
     entries: Mapped[list["JournalEntry"]] = relationship(back_populates="batch")
 
 
+class FileUpload(Base):
+    """Historial/gestión de cargas de archivos (auditoría de ingesta).
+
+    Una fila por carga efectiva. `estado` evoluciona: cargado -> reemplazado
+    (cuando una carga posterior del mismo tipo+periodo lo sustituye) | eliminado |
+    reprocesado | fallido. NO almacena el binario: solo metadatos + hash.
+    """
+    __tablename__ = "file_upload"
+    __table_args__ = (
+        Index("ix_fileupload_tipo_periodo", "tipo_archivo", "periodo"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo_archivo: Mapped[str] = mapped_column(String(30))   # espana|colombia|homologacion|terceros|arap_co|arap_es
+    nombre_original: Mapped[str] = mapped_column(String(255), default="")
+    nombre_interno: Mapped[str] = mapped_column(String(40), default="")  # uuid hex
+    periodo: Mapped[str] = mapped_column(String(40), default="", index=True)  # 'YYYY-MM' o lista separada por comas
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    fecha_carga: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    fecha_actualizacion: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    registros_insertados: Mapped[int] = mapped_column(Integer, default=0)
+    hash_archivo: Mapped[str] = mapped_column(String(64), default="")
+    estado: Mapped[str] = mapped_column(String(20), default="cargado")  # cargado|reemplazado|eliminado|reprocesado|fallido
+    observaciones: Mapped[str] = mapped_column(Text, default="")
+
+
 class JournalEntry(Base):
     __tablename__ = "journal_entry"
     __table_args__ = (

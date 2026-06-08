@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.services import arap_service as svc
+from app.services import ingest as ingest_svc
 from db.base import get_db
 from db.models import AuditLog, User
 
@@ -34,6 +35,8 @@ async def ingest_co(file: UploadFile = File(...), db: Session = Depends(get_db),
         db.add(AuditLog(entidad="arap", entidad_id="colombia", accion="create",
                         valor_despues=str(res), usuario_id=user.id))
         db.commit()
+        ingest_svc.registrar_carga(db, tipo="arap_co", nombre_original=file.filename or "",
+                                   path=path, resultado=res, usuario_id=user.id)
         return {"ok": True, "archivo": file.filename, **res}
     finally:
         try: os.unlink(path)
@@ -53,6 +56,8 @@ async def ingest_es(file: UploadFile = File(...), db: Session = Depends(get_db),
         db.add(AuditLog(entidad="arap", entidad_id="espana", accion="create",
                         valor_despues=str(res), usuario_id=user.id))
         db.commit()
+        ingest_svc.registrar_carga(db, tipo="arap_es", nombre_original=file.filename or "",
+                                   path=path, resultado=res, usuario_id=user.id)
         return {"ok": True, "archivo": file.filename, **res}
     finally:
         try: os.unlink(path)
