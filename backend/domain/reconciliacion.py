@@ -78,13 +78,26 @@ def cruzar_pyg(
     return _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct)
 
 
+def _suma_codigos(idx_periodo: dict, codes) -> float:
+    """Suma los valores de las cuentas del grupo. Soporta wildcard final
+    ('642.0.0.x' / '642.0.0.*') que agrupa todas las subcuentas con ese prefijo."""
+    total = 0.0
+    for code in codes:
+        if code and code[-1] in ("x", "X", "*"):
+            pref = code[:-1]
+            total += sum(v for k, v in idx_periodo.items() if k.startswith(pref))
+        else:
+            total += idx_periodo.get(code, 0.0)
+    return total
+
+
 def _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct) -> list[ResultadoConciliacion]:
     periodos = sorted(set(co_idx) & set(es_idx))
     resultados: list[ResultadoConciliacion] = []
     for g in grupos:
         for periodo in periodos:
-            total_co = round(sum(co_idx[periodo].get(code, 0.0) for code in g.cuentas_co), 2)
-            total_es = round(sum(es_idx[periodo].get(code, 0.0) for code in g.cuentas_es), 2)
+            total_co = round(_suma_codigos(co_idx[periodo], g.cuentas_co), 2)
+            total_es = round(_suma_codigos(es_idx[periodo], g.cuentas_es), 2)
             dif, pct, estado = _estado(total_co, total_es, tol_abs, tol_pct)
             resultados.append(ResultadoConciliacion(
                 grupo=g.grupo, tipo=g.tipo, periodo=periodo,

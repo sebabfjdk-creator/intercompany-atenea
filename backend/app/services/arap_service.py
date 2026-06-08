@@ -154,7 +154,8 @@ def _sumas_mov(db: Session, desde=None, hasta=None) -> dict:
 
 
 def reconciliacion(db: Session, tipo: str | None = None, desde=None, hasta=None) -> dict:
-    umbral = settings.tolerancia_abs_cop
+    from app.services import config_service
+    umbral, _ = config_service.get_tolerancia(db)
     sumas = _sumas_mov(db, desde, hasta)
     rows = db.scalars(select(ArApBalance).where(ArApBalance.es_provisional.is_(False))).all()
     # indexar por (tipo, nit)

@@ -101,6 +101,39 @@ def test_users_crud(client):
     assert r.status_code == 200
 
 
+def test_config_homologacion_editable(client):
+    # GET inicial
+    h = client.get("/api/config/homologacion").json()
+    assert h["grupos"] and "tipo" in h["grupos"][0]
+    # editar: tomar los grupos, renombrar el primero y guardar
+    grupos = [{"grupo": g["grupo"], "tipo": g["tipo"], "tipo_relacion": g["tipo_relacion"],
+               "cuentas_co": g["cuentas_co"], "cuentas_es": g["cuentas_es"]} for g in h["grupos"]]
+    grupos[0]["grupo"] = "GRUPO EDITADO TEST"
+    r = client.put("/api/config/homologacion", json={"grupos": grupos})
+    assert r.status_code == 200, r.text
+    # GET refleja el cambio
+    h2 = client.get("/api/config/homologacion").json()
+    assert any(g["grupo"] == "GRUPO EDITADO TEST" for g in h2["grupos"])
+    # validación: grupo sin cuentas -> 422
+    bad = client.put("/api/config/homologacion", json={"grupos": [{"grupo": "X", "tipo": "gasto", "cuentas_co": [], "cuentas_es": []}]})
+    assert bad.status_code == 422
+
+
+def test_config_tolerancia(client):
+    r = client.put("/api/config/tolerancia", json={"tolerancia_abs_cop": 5000, "tolerancia_pct": 0.01})
+    assert r.status_code == 200
+    h = client.get("/api/config/homologacion").json()
+    assert h["tolerancia_abs_cop"] == 5000
+    # recalcular es no-op (live)
+    assert client.post("/api/config/recalcular").json()["ok"] is True
+
+
+def test_config_export(client):
+    r = client.get("/api/config/homologacion/export")
+    assert r.status_code == 200
+    assert r.content[:2] == b"PK"  # xlsx es un zip
+
+
 def test_role_admin_co_no_sube_espana(client):
     token_co = create_access_token("colombia@atenea.com", "admin_co")
     r = client.post("/api/ingest/espana", headers={"Authorization": f"Bearer {token_co}"},

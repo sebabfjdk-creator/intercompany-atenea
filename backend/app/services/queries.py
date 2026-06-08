@@ -7,34 +7,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.services import config_service
 from db.models import AccountMapping, AccountPeriod, AuditLog, TerceroBridge
 from domain.reconciliacion import causa_sugerida, cruzar_pyg_periodos
-from ingestion.homologacion import GrupoHomologado
 
 settings = get_settings()
 
 
-def _grupos_desde_mapping(db: Session) -> list[GrupoHomologado]:
-    rows = db.scalars(select(AccountMapping).where(AccountMapping.activo.is_(True))).all()
-    by: dict[str, dict] = defaultdict(lambda: {"co": set(), "es": set()})
-    for r in rows:
-        if r.cuenta_co_patron:
-            by[r.grupo_homologado]["co"].add(r.cuenta_co_patron)
-        if r.cuenta_es:
-            by[r.grupo_homologado]["es"].add(r.cuenta_es)
-    grupos = []
-    for grupo, d in by.items():
-        co = sorted(d["co"])
-        es = sorted(d["es"])
-        tipo = "ingreso" if any(c[:1] == "4" for c in co) or any(c[:1] == "7" for c in es) else "gasto"
-        grupos.append(GrupoHomologado(grupo=grupo, tipo=tipo, cuentas_co=co, cuentas_es=es))
-    return grupos
-
-
 def _resultados(db: Session):
-    grupos = _grupos_desde_mapping(db)
+    grupos = config_service.grupos_homologados(db)
+    abs_cop, pct = config_service.get_tolerancia(db)
     filas = db.scalars(select(AccountPeriod)).all()
-    return cruzar_pyg_periodos(grupos, filas, settings.tolerancia_abs_cop, settings.tolerancia_pct)
+    return cruzar_pyg_periodos(grupos, filas, abs_cop, pct)
 
 
 def comparativa(db: Session) -> dict:
@@ -117,15 +101,7 @@ def terceros(db: Session) -> dict:
 
 
 def homologacion(db: Session) -> dict:
-    grupos = _grupos_desde_mapping(db)
-    return {
-        "grupos": [{
-            "grupo": g.grupo, "tipo": g.tipo, "tipo_relacion": g.tipo_relacion,
-            "cuentas_co": g.cuentas_co, "cuentas_es": g.cuentas_es,
-        } for g in sorted(grupos, key=lambda x: (x.tipo, x.grupo))],
-        "tolerancia_abs_cop": settings.tolerancia_abs_cop,
-        "tolerancia_pct": settings.tolerancia_pct,
-    }
+    return config_service.get_homologacion(db)
 
 
 def auditoria(db: Session, limit: int = 200) -> list[dict]:

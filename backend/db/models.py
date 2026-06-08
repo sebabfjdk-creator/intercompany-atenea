@@ -273,6 +273,26 @@ class ArApBalance(Base):
     periodo: Mapped[str] = mapped_column(String(10), default="2026-Q1")
 
 
+class HomologationGroup(Base):
+    """Metadatos editables de cada grupo homologado (tipo y relación).
+    Las cuentas viven en account_mapping (grupo_homologado == nombre)."""
+    __tablename__ = "homologation_group"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    tipo: Mapped[str] = mapped_column(String(20), default="gasto")  # gasto|ingreso|activo|pasivo
+    tipo_relacion: Mapped[str] = mapped_column(String(20), default="directa")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AppConfig(Base):
+    """Configuración clave-valor editable desde la app (p.ej. tolerancias)."""
+    __tablename__ = "app_config"
+
+    clave: Mapped[str] = mapped_column(String(60), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(120), default="")
+
+
 class ArApMovimiento(Base):
     """Movimientos individuales AR/AP por tercero (para detalle 'Ver más' y filtros de fecha)."""
     __tablename__ = "arap_movimiento"

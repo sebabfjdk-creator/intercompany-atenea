@@ -17,6 +17,21 @@ from ingestion.espana import parse_espana_movimientos
 from ingestion.homologacion import load_homologacion
 
 
+def test_wildcard_agrupa_subcuentas():
+    from ingestion.homologacion import GrupoHomologado
+    from domain.reconciliacion import cruzar_pyg_periodos
+    g = GrupoHomologado(grupo="Ventas", tipo="ingreso", cuentas_co=["41"], cuentas_es=["700.0.0.x"])
+    filas = [
+        ("CO", "41", "2026-01", 0, 100),         # ingreso: haber-debe = 100
+        ("ES", "700.0.0.001", "2026-01", 0, 60),
+        ("ES", "700.0.0.002", "2026-01", 0, 40),
+        ("ES", "701.0.0.001", "2026-01", 0, 999),  # NO debe entrar (otro prefijo)
+    ]
+    res = cruzar_pyg_periodos([g], filas)
+    assert len(res) == 1
+    assert res[0].total_co == 100 and res[0].total_es == 100  # 60+40, excluye 701
+
+
 def test_valor_co_signo_por_clase():
     ingreso = CuentaBalanceCO("41xxxx", "Ventas", 6, 0, 100, 900, -800)
     gasto = CuentaBalanceCO("51xxxx", "Sueldos", 6, 0, 900, 100, 800)
