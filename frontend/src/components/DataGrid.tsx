@@ -13,14 +13,19 @@ export interface DataGridProps {
   onRowClicked?: (data: any) => void;
   getRowClass?: (params: any) => string | undefined;
   context?: any;                  // expuesto a cellRenderers (p.ej. handlers de acciones)
+  // Ajuste inicial de columnas (sin estado guardado):
+  //  - "fit"     -> sizeColumnsToFit (rellena el ancho del contenedor) [por defecto]
+  //  - "content" -> autoSizeAllColumns (Excel-style: cada columna a su contenido + scroll horizontal)
+  autoSize?: "fit" | "content";
 }
 
 // Grilla enterprise reutilizable (AG Grid Community, tema Quartz).
 // Cubre: resize, reorder (DnD), freeze/pin (colDef.pinned), virtual scroll,
 // sort, filtros por columna (floating), búsqueda rápida, columnas ocultables,
 // tooltips, header sticky y persistencia por usuario en localStorage.
-export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh", pageSize = 50, onRowClicked, getRowClass, context }: DataGridProps) {
+export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh", pageSize = 50, onRowClicked, getRowClass, context, autoSize = "fit" }: DataGridProps) {
   const apiRef = useRef<GridApi | null>(null);
+  const hasSavedRef = useRef(false);
   const [search, setSearch] = useState("");
   const [colsOpen, setColsOpen] = useState(false);
   const [, force] = useState(0);
@@ -30,6 +35,12 @@ export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh",
     resizable: true, sortable: true, filter: true, floatingFilter: true,
     minWidth: 90, tooltipValueGetter: (p: any) => (p.value == null ? "" : String(p.value)),
   }), []);
+
+  // Ajuste inicial: por contenido (Excel) o al ancho del contenedor.
+  const aplicarAjuste = useCallback((api: GridApi) => {
+    if (autoSize === "content") api.autoSizeAllColumns();
+    else api.sizeColumnsToFit();
+  }, [autoSize]);
 
   const saveState = useCallback(() => {
     if (apiRef.current) {
@@ -41,16 +52,22 @@ export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh",
     apiRef.current = e.api;
     try {
       const saved = localStorage.getItem(storeKey);
+      hasSavedRef.current = !!saved;
       if (saved) e.api.applyColumnState({ state: JSON.parse(saved), applyOrder: true });
-      else e.api.sizeColumnsToFit();
-    } catch { e.api.sizeColumnsToFit(); }
+    } catch { hasSavedRef.current = false; }
     force((n) => n + 1); // re-render para poblar el selector de columnas
   }, [storeKey]);
 
+  // El auto-fit por contenido necesita filas renderizadas -> onFirstDataRendered.
+  const onFirstDataRendered = useCallback((e: any) => {
+    if (!hasSavedRef.current) aplicarAjuste(e.api);
+  }, [aplicarAjuste]);
+
   function reset() {
     localStorage.removeItem(storeKey);
+    hasSavedRef.current = false;
     apiRef.current?.resetColumnState();
-    apiRef.current?.sizeColumnsToFit();
+    if (apiRef.current) aplicarAjuste(apiRef.current);
   }
 
   return (
@@ -72,7 +89,10 @@ export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh",
             </div>
           )}
         </div>
-        <button onClick={reset} className="px-3 py-1.5 text-sm border rounded text-slate-500 ml-auto" title="Restablecer orden/ancho/columnas">Restablecer vista</button>
+        <button onClick={() => { apiRef.current?.autoSizeAllColumns(); saveState(); }}
+          className="px-3 py-1.5 text-sm border rounded text-slate-600 ml-auto"
+          title="Ajustar el ancho de cada columna a su contenido (como Excel)">Ajustar ancho</button>
+        <button onClick={reset} className="px-3 py-1.5 text-sm border rounded text-slate-500" title="Restablecer orden/ancho/columnas">Restablecer vista</button>
       </div>
       <div className="ag-theme-quartz" style={{ height, width: "100%" }}>
         <AgGridReact
@@ -90,6 +110,7 @@ export default function DataGrid({ gridId, columnDefs, rowData, height = "70vh",
           rowHeight={34}
           headerHeight={40}
           onGridReady={onGridReady}
+          onFirstDataRendered={onFirstDataRendered}
           onColumnMoved={saveState}
           onColumnResized={saveState}
           onColumnVisible={saveState}

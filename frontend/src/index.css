@@ -25,3 +25,8 @@ body {
 .ag-theme-quartz .ag-header-cell-text { font-weight: 600; letter-spacing: .02em; }
 .ag-theme-quartz .ag-cell { display: flex; align-items: center; }
 .ag-theme-quartz .ag-row.ag-row-sel { background-color: #e3edfb; }
+/* Separadores verticales definidos entre columnas (look BlackLine/Excel) */
+.ag-theme-quartz .ag-header-cell,
+.ag-theme-quartz .ag-cell { border-right: 1px solid #eef1f6; }
+.ag-theme-quartz .ag-pinned-left-header .ag-header-cell:last-child,
+.ag-theme-quartz .ag-cell.ag-cell-last-left-pinned { border-right: 1px solid #d4dae6; }

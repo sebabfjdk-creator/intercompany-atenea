@@ -93,9 +93,9 @@ export default function Config() {
     { field: "grupo", headerName: "Grupo", minWidth: 240, pinned: "left", tooltipField: "grupo", cellClass: "font-medium" },
     { field: "tipo", headerName: "Tipo", width: 110, cellClass: "capitalize" },
     { field: "tipo_relacion", headerName: "Relación", width: 130 },
-    { colId: "cuentas_co", headerName: "Cuentas Colombia", minWidth: 260, cellClass: "font-mono",
+    { colId: "cuentas_co", headerName: "Cuentas Colombia", minWidth: 260, maxWidth: 720, cellClass: "font-mono",
       valueGetter: (p: any) => (p.data?.cuentas_co?.join(", ") || "—"), tooltipValueGetter: (p: any) => p.value },
-    { colId: "cuentas_es", headerName: "Cuentas España", minWidth: 320, cellClass: "font-mono",
+    { colId: "cuentas_es", headerName: "Cuentas España", minWidth: 320, maxWidth: 720, cellClass: "font-mono",
       valueGetter: (p: any) => (p.data?.cuentas_es?.join(", ") || "—"), tooltipValueGetter: (p: any) => p.value },
   ], []);
 
@@ -171,7 +171,7 @@ export default function Config() {
                   </div>
                 </>
               ) : (
-                <DataGrid gridId="homologacion" columnDefs={cols} rowData={data.grupos} pageSize={100} />
+                <DataGrid gridId="homologacion" columnDefs={cols} rowData={data.grupos} pageSize={100} autoSize="content" />
               )}
             </Card>
             {!puedeEditar && <p className="text-xs text-slate-400 mt-3">Tu rol es de solo lectura sobre la configuración.</p>}
