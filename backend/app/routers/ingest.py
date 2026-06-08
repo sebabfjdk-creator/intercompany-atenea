@@ -94,6 +94,27 @@ def listar_archivos(db: Session = Depends(get_db), user: User = Depends(get_curr
     } for f, email in rows]
 
 
+@router.get("/periodos")
+def listar_periodos(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Periodos PYG cargados (para el panel de gestión de periodos)."""
+    return ingest_svc.periodos_cargados(db)
+
+
+@router.delete("/periodo")
+def eliminar_periodo(pais: str = Query(...), periodo: str = Query(...),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Elimina los datos PYG de un (pais, periodo). Recalculo en vivo."""
+    if pais not in ("CO", "ES"):
+        raise HTTPException(400, "pais debe ser CO o ES")
+    if pais == "ES" and user.rol == "admin_co":
+        raise HTTPException(403, "admin_co no puede eliminar datos del libro de España")
+    res = ingest_svc.eliminar_periodo(db, pais, periodo)
+    db.add(AuditLog(entidad="account_period", entidad_id=f"{pais}:{periodo}", accion="delete",
+                    valor_antes=str(res), usuario_id=user.id))
+    db.commit()
+    return {"ok": True, "pais": pais, "periodo": periodo, **res}
+
+
 class ObservacionIn(BaseModel):
     observaciones: str = ""
 

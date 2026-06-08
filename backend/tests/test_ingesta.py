@@ -81,3 +81,25 @@ def test_conflicto_periodo_y_eliminar(tmp_path, f_espana):
         ingest_svc.eliminar_datos_de(db, "espana", ",".join(res["periodos"]))
         db.commit()
         assert db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES")) == 0
+
+
+def test_eliminar_periodo_solo_afecta_ese_periodo(tmp_path, f_espana):
+    if not f_espana.exists():
+        pytest.skip("falta espana_delsol.xlsx")
+    S = _session(tmp_path)
+    with S() as db:
+        ingest_svc.ingest_espana(db, str(f_espana))  # carga 2026-01 y 2026-02-03
+        from db.models import AccountPeriod as AP
+        cargados = ingest_svc.periodos_cargados(db)
+        periodos = {r["periodo"] for r in cargados if r["pais"] == "ES"}
+        assert {"2026-01", "2026-02-03"} <= periodos
+
+        n01 = db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES", AP.periodo == "2026-01"))
+        assert n01 > 0
+        # eliminar SOLO Feb-Marzo
+        res = ingest_svc.eliminar_periodo(db, "ES", "2026-02-03")
+        db.commit()
+        assert res["cuentas"] > 0
+        # Enero intacto; Feb-Marzo borrado
+        assert db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES", AP.periodo == "2026-02-03")) == 0
+        assert db.scalar(select(func.count()).select_from(AP).where(AP.pais == "ES", AP.periodo == "2026-01")) == n01

@@ -15,6 +15,8 @@ interface Carga {
   fecha: string | null; registros: number; estado: string; observaciones: string;
 }
 
+interface Periodo { pais: string; periodo: string; cuentas: number; movimientos: number }
+
 const TIPOS = [
   { id: "homologacion", label: "Homologación de cuentas", hint: "Hoja Gastos/Ingresos + Puente Terceros", es: true },
   { id: "terceros", label: "Puente de terceros (NIF↔NIT)", hint: "Mismo archivo de homologación", es: true },
@@ -87,8 +89,20 @@ function AccionesCell(p: any) {
 export default function Ingesta() {
   const est = useFetch<Estado>("/api/estado-datos");
   const hist = useFetch<Carga[]>("/api/ingest/archivos");
+  const pers = useFetch<Periodo[]>("/api/ingest/periodos");
   const esAdminCo = rol() === "admin_co";
-  const reloadAll = () => { est.reload(); hist.reload(); };
+  const reloadAll = () => { est.reload(); hist.reload(); pers.reload(); };
+
+  async function onDeletePeriodo(p: Periodo) {
+    const pais = p.pais === "ES" ? "España" : "Colombia";
+    if (!window.confirm(`Eliminar el periodo ${p.periodo} de ${pais} (${p.cuentas} cuentas, ${p.movimientos} movimientos). Esta acción borra los balances PYG de ese periodo. ¿Continuar?`)) return;
+    try {
+      await api.delete(`/api/ingest/periodo?pais=${encodeURIComponent(p.pais)}&periodo=${encodeURIComponent(p.periodo)}`);
+      reloadAll();
+    } catch (e: any) {
+      alert(typeof e?.response?.data?.detail === "string" ? e.response.data.detail : "Error al eliminar el periodo");
+    }
+  }
 
   async function onEditObs(r: Carga) {
     const obs = window.prompt("Observaciones / comentarios (no modifica datos contables):", r.observaciones || "");
@@ -146,6 +160,49 @@ export default function Ingesta() {
           <p className="text-xs text-slate-400 mt-3">
             Puedes subir el mismo archivo (CarteraYPasivos) en ambos slots: cada uno toma sus hojas
             (Atenea = España, Neuron = Colombia). Las cuentas amarillas (provisionales) no cruzan.
+          </p>
+        </Card>
+
+        <Card title="Periodos cargados (balances PYG)" className="mt-4">
+          {pers.data && pers.data.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-slate-400 border-b border-slate-100">
+                <tr>
+                  <th className="text-left py-2">País</th>
+                  <th className="text-left">Periodo</th>
+                  <th className="text-right">Cuentas</th>
+                  <th className="text-right">Movimientos</th>
+                  <th className="text-right pr-1">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pers.data.map((p) => (
+                  <tr key={`${p.pais}-${p.periodo}`} className="border-b border-slate-50 hover:bg-slate-50">
+                    <td className="py-2">
+                      <span className={p.pais === "ES" ? "text-es font-medium" : "text-co font-medium"}>
+                        {p.pais === "ES" ? "España" : "Colombia"}
+                      </span>
+                    </td>
+                    <td className="font-mono">{p.periodo}</td>
+                    <td className="text-right tabular-nums">{p.cuentas.toLocaleString("es-CO")}</td>
+                    <td className="text-right tabular-nums">{p.movimientos.toLocaleString("es-CO")}</td>
+                    <td className="text-right pr-1">
+                      <button onClick={() => onDeletePeriodo(p)} disabled={esAdminCo && p.pais === "ES"}
+                        className="px-2 py-1 text-xs border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={esAdminCo && p.pais === "ES" ? "admin_co no puede borrar datos de España" : "Eliminar este periodo"}>
+                        🗑️ Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-sm text-slate-400">No hay periodos PYG cargados.</p>
+          )}
+          <p className="text-xs text-slate-400 mt-3">
+            Elimina aquí un periodo completo (p.ej. <b>2026-02-03</b>) sin tocar los demás. Útil para
+            re-cargar Febrero y Marzo por separado cuando dispongas de balances mensuales.
           </p>
         </Card>
 

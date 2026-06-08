@@ -18,7 +18,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import openpyxl
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -250,6 +250,36 @@ def eliminar_datos_de(db: Session, tipo: str, periodo: str) -> None:
         db.execute(delete(AccountMapping))
     elif tipo == "terceros":
         db.execute(delete(TerceroBridge))
+
+
+def periodos_cargados(db: Session) -> list[dict]:
+    """Periodos PYG actualmente en BD (para el panel 'Periodos cargados'),
+    con conteo de cuentas y movimientos por (pais, periodo)."""
+    cta = db.execute(select(AccountPeriod.pais, AccountPeriod.periodo, func.count())
+                     .group_by(AccountPeriod.pais, AccountPeriod.periodo)).all()
+    mov = {(p, per): n for p, per, n in db.execute(
+        select(PygMovimiento.pais, PygMovimiento.periodo, func.count())
+        .group_by(PygMovimiento.pais, PygMovimiento.periodo)).all()}
+    out = [{"pais": p, "periodo": per, "cuentas": int(n), "movimientos": int(mov.get((p, per), 0))}
+           for p, per, n in cta]
+    out.sort(key=lambda x: (x["periodo"], x["pais"]))
+    return out
+
+
+def eliminar_periodo(db: Session, pais: str, periodo: str) -> dict:
+    """Borra los datos PYG de un (pais, periodo) y marca como 'eliminado' las
+    cargas del historial que lo cubran. NO hace commit (lo hace el router)."""
+    nc = db.execute(delete(AccountPeriod).where(
+        AccountPeriod.pais == pais, AccountPeriod.periodo == periodo)).rowcount
+    nm = db.execute(delete(PygMovimiento).where(
+        PygMovimiento.pais == pais, PygMovimiento.periodo == periodo)).rowcount
+    tipo = "espana" if pais == "ES" else "colombia"
+    for f in db.scalars(select(FileUpload).where(
+            FileUpload.tipo_archivo == tipo, FileUpload.estado == "cargado")).all():
+        if periodo in f.periodo.split(","):
+            f.estado = "eliminado"
+            f.fecha_actualizacion = datetime.now(timezone.utc)
+    return {"cuentas": int(nc or 0), "movimientos": int(nm or 0)}
 
 
 def registrar_carga(db: Session, *, tipo: str, nombre_original: str, path: str,
