@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import type { ColDef } from "ag-grid-community";
 import { api, descargarArchivo } from "../api";
 import { useFetch, rol } from "../lib/useFetch";
 import { fmtCOP, fmtPct } from "../lib/format";
 import { PageHeader, Card, DataState, Kpi } from "../components/ui";
+import DataGrid from "../components/DataGrid";
 
 interface Grupo {
   id?: number | null; grupo: string; tipo: string; tipo_relacion: string;
@@ -86,6 +88,17 @@ export default function Config() {
       !q || g.grupo.toLowerCase().includes(q) || g.cuentas_co.join(",").includes(q) || g.cuentas_es.join(",").includes(q));
   }, [editing, draft, data, search]);
 
+  // Columnas de la grilla enterprise (modo lectura). El modo edición conserva su tabla inline.
+  const cols = useMemo<ColDef[]>(() => [
+    { field: "grupo", headerName: "Grupo", minWidth: 240, pinned: "left", tooltipField: "grupo", cellClass: "font-medium" },
+    { field: "tipo", headerName: "Tipo", width: 110, cellClass: "capitalize" },
+    { field: "tipo_relacion", headerName: "Relación", width: 130 },
+    { colId: "cuentas_co", headerName: "Cuentas Colombia", minWidth: 260, cellClass: "font-mono",
+      valueGetter: (p: any) => (p.data?.cuentas_co?.join(", ") || "—"), tooltipValueGetter: (p: any) => p.value },
+    { colId: "cuentas_es", headerName: "Cuentas España", minWidth: 320, cellClass: "font-mono",
+      valueGetter: (p: any) => (p.data?.cuentas_es?.join(", ") || "—"), tooltipValueGetter: (p: any) => p.value },
+  ], []);
+
   return (
     <div>
       <PageHeader title="Configuración" subtitle="Homologación de cuentas y umbrales de tolerancia"
@@ -124,39 +137,42 @@ export default function Config() {
             </div>
 
             <Card title="Tabla de homologación (CO ↔ ES)">
-              <div className="flex items-center gap-3 mb-3">
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar grupo o código…" className="border rounded px-3 py-2 text-sm flex-1" />
-                {editing && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">{changes} cambios sin guardar</span>
-                    <button onClick={addGrupo} className="px-3 py-2 text-sm border rounded">+ Nuevo grupo</button>
-                    <button onClick={() => setEditing(false)} className="px-3 py-2 text-sm bg-slate-200 rounded">Cancelar</button>
-                    <button onClick={guardar} disabled={saving} className="px-3 py-2 text-sm bg-emerald-600 text-white rounded">{saving ? "Guardando…" : "Guardar cambios"}</button>
+              {editing ? (
+                <>
+                  <div className="flex items-center gap-3 mb-3">
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar grupo o código…" className="border rounded px-3 py-2 text-sm flex-1" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{changes} cambios sin guardar</span>
+                      <button onClick={addGrupo} className="px-3 py-2 text-sm border rounded">+ Nuevo grupo</button>
+                      <button onClick={() => setEditing(false)} className="px-3 py-2 text-sm bg-slate-200 rounded">Cancelar</button>
+                      <button onClick={guardar} disabled={saving} className="px-3 py-2 text-sm bg-emerald-600 text-white rounded">{saving ? "Guardando…" : "Guardar cambios"}</button>
+                    </div>
                   </div>
-                )}
-              </div>
-              <div className="overflow-x-auto max-h-[60vh]">
-                <table className="w-full text-sm">
-                  <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white">
-                    <tr><th className="text-left py-2">Grupo</th><th className="text-left">Tipo</th><th className="text-left">Relación</th><th className="text-left">Cuentas Colombia</th><th className="text-left">Cuentas España</th>{editing && <th></th>}</tr>
-                  </thead>
-                  <tbody>
-                    {filas.map(({ g, i }) => (
-                      <tr key={i} className="border-t border-slate-100 align-top">
-                        <td className="py-2 max-w-[200px]">
-                          {editing ? <input value={g.grupo} onChange={(e) => upd(i, { grupo: e.target.value })} className="border rounded px-2 py-1 w-full text-sm" />
-                            : <span className="font-medium truncate" title={g.grupo}>{g.grupo}</span>}
-                        </td>
-                        <td>{editing ? <select value={g.tipo} onChange={(e) => upd(i, { tipo: e.target.value })} className="border rounded px-1 py-1 text-sm">{TIPOS.map((t) => <option key={t}>{t}</option>)}</select> : <span className="capitalize">{g.tipo}</span>}</td>
-                        <td>{editing ? <select value={g.tipo_relacion} onChange={(e) => upd(i, { tipo_relacion: e.target.value })} className="border rounded px-1 py-1 text-sm">{RELS.map((t) => <option key={t}>{t}</option>)}</select> : <span className="text-xs px-2 py-0.5 rounded bg-slate-100">{g.tipo_relacion}</span>}</td>
-                        <td className="font-mono text-xs">{editing ? <TagInput value={g.cuentas_co} onChange={(v) => upd(i, { cuentas_co: v })} /> : g.cuentas_co.join(", ") || "—"}</td>
-                        <td className="font-mono text-xs">{editing ? <TagInput value={g.cuentas_es} onChange={(v) => upd(i, { cuentas_es: v })} /> : g.cuentas_es.join(", ") || "—"}</td>
-                        {editing && <td><button onClick={() => delGrupo(i)} className="text-red-500 hover:text-red-700" title="Eliminar">🗑️</button></td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  <div className="overflow-x-auto max-h-[60vh]">
+                    <table className="w-full text-sm">
+                      <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white">
+                        <tr><th className="text-left py-2">Grupo</th><th className="text-left">Tipo</th><th className="text-left">Relación</th><th className="text-left">Cuentas Colombia</th><th className="text-left">Cuentas España</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {filas.map(({ g, i }) => (
+                          <tr key={i} className="border-t border-slate-100 align-top">
+                            <td className="py-2 max-w-[200px]">
+                              <input value={g.grupo} onChange={(e) => upd(i, { grupo: e.target.value })} className="border rounded px-2 py-1 w-full text-sm" />
+                            </td>
+                            <td><select value={g.tipo} onChange={(e) => upd(i, { tipo: e.target.value })} className="border rounded px-1 py-1 text-sm">{TIPOS.map((t) => <option key={t}>{t}</option>)}</select></td>
+                            <td><select value={g.tipo_relacion} onChange={(e) => upd(i, { tipo_relacion: e.target.value })} className="border rounded px-1 py-1 text-sm">{RELS.map((t) => <option key={t}>{t}</option>)}</select></td>
+                            <td className="font-mono text-xs"><TagInput value={g.cuentas_co} onChange={(v) => upd(i, { cuentas_co: v })} /></td>
+                            <td className="font-mono text-xs"><TagInput value={g.cuentas_es} onChange={(v) => upd(i, { cuentas_es: v })} /></td>
+                            <td><button onClick={() => delGrupo(i)} className="text-red-500 hover:text-red-700" title="Eliminar">🗑️</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <DataGrid gridId="homologacion" columnDefs={cols} rowData={data.grupos} pageSize={100} />
+              )}
             </Card>
             {!puedeEditar && <p className="text-xs text-slate-400 mt-3">Tu rol es de solo lectura sobre la configuración.</p>}
           </>

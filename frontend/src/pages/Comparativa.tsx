@@ -143,19 +143,19 @@ export default function Comparativa() {
               <Kpi label="Σ |Diferencias|" value={fmtCOP(data.kpis.dif_total_abs)} tone="amber" />
             </div>
             <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+              <div className="overflow-auto max-h-[72vh]">
+                <table className="w-full text-sm border-separate border-spacing-0">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
                     <tr>
-                      <th className="text-left px-3 py-2">Grupo</th>
-                      {data.periodos.map((p) => <th key={p} className="text-right px-3 py-2" colSpan={3}>{periodoLabel(p)}</th>)}
+                      <th className="text-left px-3 py-2 sticky left-0 top-0 z-30 bg-slate-50 border-b border-slate-200">Grupo</th>
+                      {data.periodos.map((p) => <th key={p} className="text-right px-3 py-2 sticky top-0 z-20 bg-slate-50 border-b border-l border-slate-200" colSpan={3}>{periodoLabel(p)}</th>)}
                     </tr>
                     <tr className="text-[10px]">
-                      <th></th>
+                      <th className="sticky left-0 top-[33px] z-30 bg-slate-50 border-b border-slate-200"></th>
                       {data.periodos.flatMap((p) => [
-                        <th key={p + "co"} className="text-right px-3 py-1 text-co">CO</th>,
-                        <th key={p + "es"} className="text-right px-3 py-1 text-es">ES</th>,
-                        <th key={p + "d"} className="text-right px-3 py-1">Dif</th>,
+                        <th key={p + "co"} className="text-right px-3 py-1 text-co sticky top-[33px] z-20 bg-slate-50 border-b border-l border-slate-200">CO</th>,
+                        <th key={p + "es"} className="text-right px-3 py-1 text-es sticky top-[33px] z-20 bg-slate-50 border-b border-slate-200">ES</th>,
+                        <th key={p + "d"} className="text-right px-3 py-1 sticky top-[33px] z-20 bg-slate-50 border-b border-slate-200">Dif</th>,
                       ])}
                     </tr>
                   </thead>
@@ -180,19 +180,19 @@ export default function Comparativa() {
 function FilaGrupo({ f, periodos, abierto, cargando, det, nCols, onToggle, SubTabla }: any) {
   return (
     <>
-      <tr className="border-t border-slate-100 hover:bg-slate-50">
-        <td className="px-3 py-2">
+      <tr className="group hover:bg-slate-50">
+        <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100">
           <button onClick={onToggle} className="mr-2 w-5 h-5 rounded border text-xs text-slate-500 hover:bg-slate-100">{abierto ? "−" : "+"}</button>
           <span className="font-medium text-slate-700">{f.grupo}</span>
           <span className="ml-2 text-[10px] text-slate-400 uppercase">{f.tipo}</span>
         </td>
         {periodos.map((p: string) => {
           const c = f.celdas[p];
-          if (!c) return <td key={p} colSpan={3} className="text-center text-slate-300">—</td>;
+          if (!c) return <td key={p} colSpan={3} className="text-center text-slate-300 border-b border-l border-slate-100">—</td>;
           return [
-            <td key={p + "co"} className="text-right px-3 py-2 tabular-nums">{fmtCOP(c.co)}</td>,
-            <td key={p + "es"} className="text-right px-3 py-2 tabular-nums">{fmtCOP(c.es)}</td>,
-            <td key={p + "d"} className={`text-right px-3 py-2 tabular-nums ${c.estado === "conciliado" ? "text-emerald-600" : "text-red-600 font-medium"}`}>
+            <td key={p + "co"} className="text-right px-3 py-2 tabular-nums border-b border-l border-slate-100">{fmtCOP(c.co)}</td>,
+            <td key={p + "es"} className="text-right px-3 py-2 tabular-nums border-b border-slate-100">{fmtCOP(c.es)}</td>,
+            <td key={p + "d"} className={`text-right px-3 py-2 tabular-nums border-b border-slate-100 ${c.estado === "conciliado" ? "text-emerald-600" : "text-red-600 font-medium"}`}>
               <div className="flex items-center justify-end gap-1">{fmtCOP(c.dif)}<EstadoBadge estado={c.estado} /></div>
               {c.causa && <div className="text-right"><CausaBadge causa={c.causa} /></div>}
             </td>,
@@ -201,7 +201,7 @@ function FilaGrupo({ f, periodos, abierto, cargando, det, nCols, onToggle, SubTa
       </tr>
       {abierto && (
         <tr className="bg-slate-50/70">
-          <td colSpan={nCols} className="px-6 py-3">
+          <td colSpan={nCols} className="px-6 py-3 border-b border-slate-100">
             {cargando && !det ? <div className="text-slate-400 text-xs">Cargando detalle…</div> : det ? (
               <div className="border-l-2 border-slate-200 pl-3">
                 <SubTabla titulo="Colombia" rows={det.colombia} totales={det.total_co} periodos={periodos} lado="co" />
