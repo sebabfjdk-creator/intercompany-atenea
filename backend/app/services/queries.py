@@ -104,6 +104,51 @@ def homologacion(db: Session) -> dict:
     return config_service.get_homologacion(db)
 
 
+def detalle_grupo(db: Session, grupo: str) -> dict:
+    """Cuentas CO y ES que componen un grupo, con su valor por periodo (drill-down)."""
+    from domain.reconciliacion import valor_periodo
+
+    g = next((x for x in config_service.grupos_homologados(db) if x.grupo == grupo), None)
+    if g is None:
+        return {"grupo": grupo, "periodos": [], "colombia": [], "espana": [], "encontrado": False}
+
+    filas = db.scalars(select(AccountPeriod)).all()
+    periodos = sorted({f.periodo for f in filas})
+    # índice pais -> codigo -> {nombre, periodo: valor}
+    idx: dict[str, dict[str, dict]] = {"CO": {}, "ES": {}}
+    for f in filas:
+        d = idx[f.pais].setdefault(f.codigo, {"nombre": f.nombre, "vals": {}})
+        d["vals"][f.periodo] = valor_periodo(f.pais, f.codigo, float(f.debe), float(f.haber))
+        if f.nombre:
+            d["nombre"] = f.nombre
+
+    def expandir(pais: str, codes: list[str]) -> list[dict]:
+        out = []
+        for code in codes:
+            if code and code[-1] in ("x", "X", "*"):
+                pref = code[:-1]
+                matched = sorted(k for k in idx[pais] if k.startswith(pref))
+            else:
+                matched = [code] if code in idx[pais] else ([code] if code else [])
+            for k in matched:
+                info = idx[pais].get(k, {"nombre": "", "vals": {}})
+                out.append({"cuenta": k, "nombre": info["nombre"],
+                            "valores": {p: round(info["vals"].get(p, 0.0), 2) for p in periodos}})
+        return out
+
+    co = expandir("CO", g.cuentas_co)
+    es = expandir("ES", g.cuentas_es)
+
+    def totales(rows):
+        return {p: round(sum(r["valores"].get(p, 0.0) for r in rows), 2) for p in periodos}
+
+    return {
+        "grupo": grupo, "tipo": g.tipo, "periodos": periodos,
+        "colombia": co, "espana": es,
+        "total_co": totales(co), "total_es": totales(es), "encontrado": True,
+    }
+
+
 def auditoria(db: Session, limit: int = 200) -> list[dict]:
     rows = db.scalars(select(AuditLog).order_by(AuditLog.ts.desc()).limit(limit)).all()
     return [{

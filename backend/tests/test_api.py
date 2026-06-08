@@ -72,6 +72,19 @@ def test_comparativa(client):
             assert celda["dif"] == round(celda["co"] - celda["es"], 2)
 
 
+def test_comparativa_detalle_grupo(client):
+    comp = client.get("/api/comparativa").json()
+    fila = next((f for f in comp["filas"] if f["celdas"]), None)
+    assert fila
+    det = client.get("/api/comparativa/detalle-grupo", params={"grupo": fila["grupo"]}).json()
+    assert det["encontrado"] is True
+    assert det["colombia"] or det["espana"]
+    # consistencia: suma del detalle == total del grupo por periodo
+    for periodo, celda in fila["celdas"].items():
+        assert det["total_co"].get(periodo, 0) == celda["co"]
+        assert det["total_es"].get(periodo, 0) == celda["es"]
+
+
 def test_terceros_y_excepciones(client):
     t = client.get("/api/terceros").json()
     assert t["kpis"]["total"] > 1500
