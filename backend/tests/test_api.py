@@ -175,6 +175,32 @@ def test_config_tolerancia(client):
     assert client.post("/api/config/recalcular").json()["ok"] is True
 
 
+def test_mover_cuenta_tras_ingesta_sin_homologation_group(tmp_path_factory, f_homologacion, f_colombia, f_espana):
+    """Regresión: el drag&drop debe funcionar tras una ingesta por Excel, donde
+    HomologationGroup está vacío (los grupos viven en account_mapping)."""
+    for f in (f_homologacion, f_colombia, f_espana):
+        if not f.exists():
+            pytest.skip("faltan archivos")
+    from app.services import config_service
+    p = tmp_path_factory.mktemp("mv") / "m.sqlite"
+    engine = create_engine(f"sqlite:///{p}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Sx = sessionmaker(bind=engine)
+    with Sx() as db:
+        ingest_svc.ingest_homologacion(db, str(f_homologacion))
+        ingest_svc.ingest_colombia(db, str(f_colombia))
+        ingest_svc.ingest_espana(db, str(f_espana))
+        grupos = config_service.get_homologacion(db)["grupos"]
+        origen = next(g for g in grupos if g["cuentas_co"])
+        destino = next(g for g in grupos if g["grupo"] != origen["grupo"] and g["cuentas_co"])
+        cuenta = origen["cuentas_co"][0]
+        # NO debe lanzar "El grupo destino no existe" (HomologationGroup está vacío)
+        res = config_service.mover_cuenta(db, cuenta, "CO", origen["grupo"], destino["grupo"])
+        h = {g["grupo"]: g for g in res["grupos"]}
+        assert cuenta in h[destino["grupo"]]["cuentas_co"]
+        assert cuenta not in h.get(origen["grupo"], {}).get("cuentas_co", [])
+
+
 def test_homologacion_mover_cuenta(client):
     h = client.get("/api/config/homologacion").json()
     grupos = h["grupos"]

@@ -127,11 +127,13 @@ def mover_cuenta(db: Session, cuenta: str, pais: str, grupo_origen: str,
         raise ValueError("pais debe ser CO o ES")
     if grupo_origen == grupo_destino:
         raise ValueError("El grupo origen y destino son el mismo")
-    if not db.scalar(select(HomologationGroup).where(HomologationGroup.nombre == grupo_destino)):
-        raise ValueError(f"El grupo destino '{grupo_destino}' no existe")
 
+    # El grupo se define por account_mapping (NO por HomologationGroup, que solo
+    # tiene metadatos y puede estar vacío tras una ingesta sin guardado en editor).
     co_o, es_o = _grupo_sets(db, grupo_origen)
     co_d, es_d = _grupo_sets(db, grupo_destino)
+    if not (co_d or es_d):
+        raise ValueError(f"El grupo destino '{grupo_destino}' no existe")
     origen_set = co_o if pais == "CO" else es_o
     destino_set = co_d if pais == "CO" else es_d
     if cuenta not in origen_set:
