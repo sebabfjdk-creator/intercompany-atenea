@@ -128,12 +128,16 @@ def ingest_colombia(db: Session, path: str) -> dict:
                 debe=round(c.debitos, 2), haber=round(c.creditos, 2),
             ))
             n += 1
-    # movimientos individuales PYG (clase 4 ingreso / 5 gasto) desde hojas Mvto_*
+    # movimientos individuales PYG (clase 4 ingreso / 5 gasto) desde hojas Mvto_*.
+    # En Siesa las cuentas PYG NO traen 'Referencia' (no son filas de detalle), vienen
+    # por tercero. Enero es arrastre (débito/crédito = 0); Feb-Marzo trae movimiento real.
     nmov = 0
     for sheet, periodo in _match_sheet(_sheets(path), _CO_MVTO_SHEETS).items():
-        for m in parse_colombia_movimientos(path, sheet, solo_detalle=True):
-            if m.cuenta[:1] not in ("4", "5"):
+        for m in parse_colombia_movimientos(path, sheet, solo_detalle=False):
+            if m.cuenta[:1] not in ("4", "5") or not m.nit:
                 continue
+            if m.debito == 0 and m.credito == 0:
+                continue  # sin movimiento del periodo (arrastre)
             concepto = (m.nombre_tercero or m.nombre_cuenta or "")
             if m.referencia:
                 concepto = f"{concepto} · {m.referencia}".strip(" ·")
@@ -185,10 +189,16 @@ def _ensure_system(db: Session, nombre: str, pais: str, fmt: str) -> SourceSyste
 
 
 def _record_batch(db: Session, sistema_id: int, file_hash: str, n: int) -> None:
-    db.add(ImportBatch(
-        sistema_id=sistema_id, periodo_mes="2026-Q1", archivo_hash=file_hash[:64],
-        estado="cargado",
+    # Idempotente: re-subir el mismo archivo no debe romper por la constraint única.
+    h = file_hash[:64]
+    existe = db.scalar(select(ImportBatch).where(
+        ImportBatch.sistema_id == sistema_id,
+        ImportBatch.periodo_mes == "2026-Q1",
+        ImportBatch.archivo_hash == h,
     ))
+    if existe:
+        return
+    db.add(ImportBatch(sistema_id=sistema_id, periodo_mes="2026-Q1", archivo_hash=h, estado="cargado"))
 
 
 INGESTORS = {

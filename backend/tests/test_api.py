@@ -85,6 +85,22 @@ def test_comparativa_detalle_grupo(client):
         assert det["total_es"].get(periodo, 0) == celda["es"]
 
 
+def test_ingest_idempotente_y_movimientos(tmp_path_factory, f_colombia):
+    if not f_colombia.exists():
+        pytest.skip("falta colombia")
+    from sqlalchemy import func, select
+    from db.models import PygMovimiento
+    p = tmp_path_factory.mktemp("idem") / "i.sqlite"
+    engine = create_engine(f"sqlite:///{p}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    S = sessionmaker(bind=engine)
+    with S() as d:
+        ingest_svc.ingest_colombia(d, str(f_colombia))
+        ingest_svc.ingest_colombia(d, str(f_colombia))  # 2ª vez: NO debe romper (idempotente)
+        n = d.scalar(select(func.count()).select_from(PygMovimiento)) or 0
+        assert n > 0  # movimientos PYG poblados
+
+
 def test_movimientos_cuenta_pyg(client):
     # tomar un grupo con cuentas ES y bajar al nivel de transacción
     comp = client.get("/api/comparativa").json()
