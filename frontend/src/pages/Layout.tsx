@@ -8,6 +8,7 @@ const TOP = [
   { to: "/excepciones", label: "Excepciones" },
   { to: "/anomalias", label: "Anomalías" },
   { to: "/ar-ap", label: "AR/AP" },
+  { to: "/cartera", label: "Cartera 360°" },
 ];
 
 // Submenú "Configuración" — centraliza la parametrización del sistema.

@@ -25,6 +25,24 @@ def db(tmp_path_factory, f_homologacion, f_cartera):
         yield d
 
 
+def test_cartera_dashboard(db):
+    from app.services import cartera_service
+    d = cartera_service.dashboard(db)
+    assert set(d) >= {"kpis", "aging", "top10", "clientes", "analisis"}
+    k = d["kpis"]
+    assert set(k) >= {"cartera_total", "clientes", "dudoso_431", "provision_recomendada"}
+    # consistencia: la suma del aging == cartera total
+    assert round(sum(a["saldo"] for a in d["aging"]), 2) == k["cartera_total"]
+    # top10 ordenado desc y con % calculado
+    saldos = [t["saldo"] for t in d["top10"]]
+    assert saldos == sorted(saldos, reverse=True)
+    # cada cliente tiene riesgo y antigüedad
+    for c in d["clientes"]:
+        assert c["riesgo"] in ("bajo", "medio", "alto", "critico")
+        assert c["antiguedad"] in ("0-30", "31-60", "61-90", "91-120", "120+", "Sin movimiento")
+    assert isinstance(d["analisis"], list) and len(d["analisis"]) >= 1
+
+
 # --- parsers puros ---
 def test_parser_espana_provisionales(f_cartera):
     if not f_cartera.exists():

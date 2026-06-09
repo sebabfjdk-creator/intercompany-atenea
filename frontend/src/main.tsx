@@ -15,6 +15,7 @@ import Config from "./pages/Config";
 import Parametros from "./pages/Parametros";
 import Ingesta from "./pages/Ingesta";
 import ArAp from "./pages/ArAp";
+import Cartera from "./pages/Cartera";
 import Usuarios from "./pages/Usuarios";
 
 function requireAuth(element: React.ReactNode) {
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: "excepciones", element: <Excepciones /> },
       { path: "anomalias", element: <Anomalias /> },
       { path: "ar-ap", element: <ArAp /> },
+      { path: "cartera", element: <Cartera /> },
       { path: "ingesta", element: <Ingesta /> },
       { path: "auditoria", element: <Auditoria /> },
       { path: "usuarios", element: <Usuarios /> },

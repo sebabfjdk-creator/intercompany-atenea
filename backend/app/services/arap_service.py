@@ -77,7 +77,7 @@ def ingest_espana(db: Session, path: str) -> dict:
         if not sheet:
             continue
         terceros = parse_arap_espana(path, sheet)
-        agg: dict[str, dict] = defaultdict(lambda: {"saldo": 0.0, "nombre": ""})
+        agg: dict[str, dict] = defaultdict(lambda: {"saldo": 0.0, "nombre": "", "s430": 0.0, "s431": 0.0})
         for t in terceros:
             if t.es_provisional:
                 db.add(ArApBalance(pais="ES", tipo=tipo, nit="", cuenta=t.cuenta_es,
@@ -87,6 +87,11 @@ def ingest_espana(db: Session, path: str) -> dict:
             key = nit or f"ES:{t.cuenta_es}"
             a = agg[key]
             a["saldo"] = round(a["saldo"] + t.saldo, 2)
+            # Separa 430 (clientes) de 431 (clientes dudoso cobro) para el módulo Cartera.
+            if t.cuenta_es.startswith("431"):
+                a["s431"] = round(a["s431"] + t.saldo, 2)
+            else:
+                a["s430"] = round(a["s430"] + t.saldo, 2)
             a["nombre"] = nombres.get(t.cuenta_es) or t.nombre
             a["nit"] = nit
             a["cuenta"] = t.cuenta_es
@@ -96,8 +101,10 @@ def ingest_espana(db: Session, path: str) -> dict:
                                       documento=str(m.documento)[:60], tipo_documento=tipo_documento(m.documento),
                                       debe=round(m.debe, 2), haber=round(m.haber, 2), saldo=round(m.saldo, 2)))
         for key, a in agg.items():
+            # saldo_a = 430 (clientes), saldo_b = 431 (dudoso cobro)
             db.add(ArApBalance(pais="ES", tipo=tipo, nit=a.get("nit", ""), cuenta=a["cuenta"],
-                               nombre=a["nombre"][:255], saldo=a["saldo"]))
+                               nombre=a["nombre"][:255], saldo=a["saldo"],
+                               saldo_a=a["s430"], saldo_b=a["s431"]))
         resumen[tipo] = len(terceros)
     db.commit()
     return {"tipo": "ar-ap/espana", "ar_terceros": resumen.get("AR", 0), "ap_terceros": resumen.get("AP", 0)}
