@@ -17,6 +17,22 @@ def _session(tmp_path):
     return sessionmaker(bind=engine)
 
 
+def test_detectar_tipo(f_homologacion, f_colombia, f_espana, f_cartera):
+    casos = [
+        (f_espana, "espana"), (f_colombia, "colombia"),
+        (f_homologacion, ("homologacion", "terceros")),
+        (f_cartera, ("arap_co", "arap_es")),  # cartera/pasivos -> AR/AP
+    ]
+    for f, esperado in casos:
+        if not f.exists():
+            continue
+        tipo = ingest_svc.detectar_tipo(str(f))
+        if isinstance(esperado, tuple):
+            assert tipo in esperado, f"{f.name}: {tipo} no en {esperado}"
+        else:
+            assert tipo == esperado, f"{f.name}: {tipo} != {esperado}"
+
+
 def test_borrado_por_periodo_no_pierde_otro_periodo(tmp_path, f_espana):
     if not f_espana.exists():
         pytest.skip("falta espana_delsol.xlsx")

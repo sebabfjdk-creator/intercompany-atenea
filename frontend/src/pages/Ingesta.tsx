@@ -35,6 +35,90 @@ function fmtFecha(s: string | null) {
   return s ? new Date(s).toLocaleString("es-CO") : "—";
 }
 
+// tipo detectado por /auto/detect -> endpoint de ingesta + etiqueta
+const DETECT_MAP: Record<string, { ep: string; label: string }> = {
+  espana: { ep: "espana", label: "España (DELSOL)" },
+  colombia: { ep: "colombia", label: "Colombia (Siesa)" },
+  homologacion: { ep: "homologacion", label: "Homologación de cuentas" },
+  terceros: { ep: "terceros", label: "Puente de terceros" },
+  arap_co: { ep: "ar-ap/colombia", label: "Colombia AR/AP" },
+  arap_es: { ep: "ar-ap/espana", label: "España AR/AP" },
+};
+
+function errText(d: any): string {
+  if (typeof d === "string") return d;
+  if (d?.mensaje) return d.mensaje;
+  return d ? JSON.stringify(d) : "Error";
+}
+
+// Sube un archivo a un endpoint de ingesta gestionando el 409 (reemplazo).
+async function postIngestWith409(ep: string, file: File): Promise<{ ok: boolean; text: string }> {
+  const mk = () => { const fd = new FormData(); fd.append("file", file); return fd; };
+  try {
+    const { data } = await api.post(`/api/ingest/${ep}`, mk());
+    return { ok: true, text: `Cargado: ${data.archivo ?? file.name}` };
+  } catch (e: any) {
+    if (e?.response?.status === 409) {
+      const m = e.response.data?.detail?.mensaje ?? "Ya existe información para este periodo. ¿Reemplazar?";
+      if (!window.confirm(m)) return { ok: false, text: "Carga cancelada (no se reemplazó)." };
+      try {
+        const { data } = await api.post(`/api/ingest/${ep}?replace=true`, mk());
+        return { ok: true, text: `Reemplazado: ${data.archivo ?? file.name}` };
+      } catch (e2: any) {
+        return { ok: false, text: errText(e2?.response?.data?.detail) || "Error" };
+      }
+    }
+    return { ok: false, text: errText(e?.response?.data?.detail) || e?.message || "Error" };
+  }
+}
+
+// Zona de autodetección: suelta cualquier Excel y se enruta al tipo correcto.
+function AutoDrop({ onDone }: { onDone: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function handle(file: File) {
+    setBusy(true); setMsg(null);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const { data } = await api.post("/api/ingest/auto/detect", fd);
+      const m = data.tipo && DETECT_MAP[data.tipo];
+      if (!m) {
+        setMsg({ ok: false, text: `No se reconoció el tipo de "${file.name}". Usa una tarjeta específica.` });
+        return;
+      }
+      setMsg({ ok: true, text: `Detectado: ${m.label} — subiendo…` });
+      const r = await postIngestWith409(m.ep, file);
+      setMsg({ ok: r.ok, text: r.ok ? `${m.label}: ${r.text}` : r.text });
+      if (r.ok) onDone();
+    } catch (e: any) {
+      setMsg({ ok: false, text: errText(e?.response?.data?.detail) || "Error detectando el archivo" });
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = "";
+    }
+  }
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) handle(f); }}
+      onClick={() => ref.current?.click()}
+      className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition
+        ${over ? "border-co bg-co/5" : "border-slate-300 bg-white hover:border-co/50"}`}>
+      <input ref={ref} type="file" accept=".xlsx,.xls" className="hidden"
+        onChange={(e) => e.target.files?.[0] && handle(e.target.files[0])} />
+      <div className="text-sm font-medium text-slate-700">⬇️ Suelta aquí cualquier Excel — detectamos el tipo automáticamente</div>
+      <div className="text-xs text-slate-400 mt-1">o haz clic para elegir. Reconoce España, Colombia, Homologación, Terceros y AR/AP.</div>
+      {busy && <p className="text-xs text-slate-500 mt-2">Procesando…</p>}
+      {msg && <p className={`text-xs mt-2 ${msg.ok ? "text-emerald-600" : "text-red-600"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function EstadoBadge({ estado }: { estado: string }) {
   const map: Record<string, { txt: string; cls: string }> = {
     cargado: { txt: "🟢 Procesado correctamente", cls: "text-emerald-600" },
@@ -77,44 +161,28 @@ function Uploader({ tipo, label, hint, disabled, cargas, onDone, onEdit, onDelet
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [verOpen, setVerOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
 
   const activa = cargas.find((c) => c.estado === "cargado") ?? null;  // más reciente activa
 
-  function errText(d: any): string {
-    if (typeof d === "string") return d;
-    if (d?.mensaje) return d.mensaje;
-    return d ? JSON.stringify(d) : "Error";
-  }
-
-  async function upload(file: File, replace = false) {
+  async function upload(file: File) {
     setBusy(true); setMsg(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const url = `/api/ingest/${tipo}${replace ? "?replace=true" : ""}`;
-      const { data } = await api.post(url, fd);
-      setMsg({ ok: true, text: `Cargado: ${data.archivo ?? file.name}` });
-      onDone();
-    } catch (e: any) {
-      const det = e?.response?.data?.detail;
-      if (e?.response?.status === 409 && !replace) {
-        const m = det?.mensaje ?? "Ya existe información para este periodo. ¿Reemplazar?";
-        if (window.confirm(m)) { await upload(file, true); return; }
-        setMsg({ ok: false, text: "Carga cancelada (no se reemplazó)." });
-      } else {
-        setMsg({ ok: false, text: errText(det) || e?.message || "Error" });
-      }
-    } finally {
-      setBusy(false);
-      if (ref.current) ref.current.value = "";
-    }
+    const r = await postIngestWith409(tipo, file);
+    setMsg(r);
+    if (r.ok) onDone();
+    setBusy(false);
+    if (ref.current) ref.current.value = "";
   }
 
   return (
-    <div className={`border rounded-lg p-4 ${disabled ? "opacity-60 bg-slate-50" : "bg-white"}`}>
+    <div
+      onDragOver={(e) => { if (!disabled) { e.preventDefault(); setOver(true); } }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f && !disabled && !busy) upload(f); }}
+      className={`border rounded-lg p-4 transition ${disabled ? "opacity-60 bg-slate-50" : "bg-white"} ${over ? "ring-2 ring-co bg-co/5" : ""}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-medium text-slate-700">{label}</div>
@@ -265,7 +333,9 @@ export default function Ingesta() {
           <Kpi label="Mapeos homolog." value={est.data?.homologacion_mappings ?? 0} />
           <Kpi label="Terceros" value={est.data?.terceros ?? 0} tone="green" />
         </div>
+        <div className="mb-4"><AutoDrop onDone={reloadAll} /></div>
         <Card title="Subir archivos (orden sugerido: homologación → terceros → Colombia → España)">
+          <p className="text-xs text-slate-400 mb-3">También puedes <b>arrastrar un Excel</b> directamente sobre cualquier tarjeta.</p>
           <div className="grid md:grid-cols-2 gap-4">
             {TIPOS.map((t) => (
               <Uploader key={t.id} tipo={t.id} label={t.label} hint={t.hint}

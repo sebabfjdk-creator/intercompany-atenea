@@ -12,7 +12,6 @@ borrando lo previo del mismo sistema antes de recargar.
 from __future__ import annotations
 
 import hashlib
-import re
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -324,15 +323,27 @@ INGESTORS = {
 
 
 def detectar_tipo(path: str) -> str | None:
-    """Heurística por nombres de hoja para auto-detectar el tipo de archivo."""
+    """Heurística por nombres de hoja para auto-detectar el tipo de archivo.
+    Orden importante: AR/AP (Cartera*/CXP*) antes que PYG, porque las hojas de
+    cartera España también contienen 'atenea'. Colombia se distingue por el
+    prefijo 'balance_'/'mvto_' (las hojas de España son 'Atenea…Mvto')."""
     sheets = [s.lower() for s in _sheets(path)]
     joined = " ".join(sheets)
-    if any("mvto" in s or "delsol" in s or re.search(r"atenea.*balance", s) for s in sheets):
-        return "espana"
-    if any(s.startswith("balance_") or s.startswith("mvto_") for s in sheets):
-        return "colombia"
+    # 1) AR/AP (cartera/pasivos): hojas Cartera*/CXP*
+    if any("cartera" in s or "cxp" in s for s in sheets):
+        if any("neuron" in s for s in sheets):
+            return "arap_co"
+        if any("atenea" in s for s in sheets):
+            return "arap_es"
+    # 2) Homologación / terceros
     if "puente terceros" in joined:
         return "homologacion"
     if "clientes" in sheets and "proveedor" in sheets:
         return "terceros"
+    # 3) PYG Colombia (Siesa): Balance_/Mvto_ (antes que España para no chocar con 'mvto')
+    if any(s.startswith("balance_") or s.startswith("mvto_") for s in sheets):
+        return "colombia"
+    # 4) PYG España (Libro Mayor DELSOL): hojas Atenea…/DELSOL
+    if any("delsol" in s or "atenea" in s for s in sheets):
+        return "espana"
     return None
