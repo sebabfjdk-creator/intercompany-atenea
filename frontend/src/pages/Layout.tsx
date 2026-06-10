@@ -67,6 +67,8 @@ export default function Layout() {
               </div>
             )}
           </div>
+
+          <NavLink to="/conciliacion-bancaria" className={linkCls}>Conciliación Bancaria</NavLink>
         </nav>
         <div className="p-3 text-[11px] text-slate-500 border-t border-slate-700">v0.5 · MVP</div>
       </aside>

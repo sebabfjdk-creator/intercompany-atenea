@@ -16,6 +16,7 @@ import Parametros from "./pages/Parametros";
 import Ingesta from "./pages/Ingesta";
 import ArAp from "./pages/ArAp";
 import Cartera from "./pages/Cartera";
+import ConciliacionBancaria from "./pages/ConciliacionBancaria";
 import Usuarios from "./pages/Usuarios";
 
 function requireAuth(element: React.ReactNode) {
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: "usuarios", element: <Usuarios /> },
       { path: "config", element: <Config /> },
       { path: "config/parametros", element: <Parametros /> },
+      { path: "conciliacion-bancaria", element: <ConciliacionBancaria /> },
     ],
   },
 ]);
