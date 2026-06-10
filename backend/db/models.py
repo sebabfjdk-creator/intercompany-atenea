@@ -336,6 +336,51 @@ class PygMovimiento(Base):
     haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
 
 
+class BankAccount(Base):
+    """Cuenta bancaria conciliable (módulo Conciliación Bancaria)."""
+    __tablename__ = "bank_account"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(120), default="")
+    numero_cuenta: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    cuenta_contable: Mapped[str] = mapped_column(String(40), default="")
+    sistema: Mapped[str] = mapped_column(String(20), default="ES")  # ES | CO (para permisos)
+
+
+class BankReconPeriod(Base):
+    """Conciliación de una cuenta bancaria en un mes."""
+    __tablename__ = "bank_recon_period"
+    __table_args__ = (UniqueConstraint("bank_account_id", "mes", name="uq_bankrecon_acc_mes"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bank_account_id: Mapped[int] = mapped_column(ForeignKey("bank_account.id"))
+    mes: Mapped[str] = mapped_column(String(7), index=True)  # 'YYYY-MM'
+    saldo_contable_inicial: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    saldo_banco_inicial: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
+    estado: Mapped[str] = mapped_column(String(20), default="pendiente")  # pendiente | cerrada
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    fecha_cierre: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    creado: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BankMovement(Base):
+    """Movimiento de un lado (contable o extracto) dentro de una conciliación."""
+    __tablename__ = "bank_movement"
+    __table_args__ = (Index("ix_bankmov_period_origen", "period_id", "origen"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    period_id: Mapped[int] = mapped_column(ForeignKey("bank_recon_period.id"), index=True)
+    origen: Mapped[str] = mapped_column(String(10))  # contable | extracto
+    fecha: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    concepto: Mapped[str] = mapped_column(Text, default="")
+    documento: Mapped[str] = mapped_column(String(60), default="")
+    monto_firmado: Mapped[float] = mapped_column(Numeric(20, 2), default=0)  # + ingreso, - pago
+    codigo_banco: Mapped[str] = mapped_column(String(40), default="")
+    estado: Mapped[str] = mapped_column(String(15), default="")  # cruzado | solo_libros | solo_banco
+    match_tipo: Mapped[str] = mapped_column(String(12), default="")  # exacto | fecha_dif
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("bank_movement.id"), nullable=True)
+
+
 class ArApMovimiento(Base):
     """Movimientos individuales AR/AP por tercero (para detalle 'Ver más' y filtros de fecha)."""
     __tablename__ = "arap_movimiento"

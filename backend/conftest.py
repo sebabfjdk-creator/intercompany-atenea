@@ -49,3 +49,14 @@ def f_bosquejo(data_dir) -> Path:
 @pytest.fixture(scope="session")
 def f_cartera(data_dir) -> Path:
     return data_dir / "cartera_pasivos.xlsx"
+
+
+# Archivos de Conciliación Bancaria (viven en la carpeta padre del repo)
+@pytest.fixture(scope="session")
+def f_bancos_contable() -> Path:
+    return REPO_ROOT.parent / "Bancos Atenea.xlsx"
+
+
+@pytest.fixture(scope="session")
+def f_banco_extracto() -> Path:
+    return REPO_ROOT.parent / "BancosBancolombia Febrero.xlsx"
