@@ -32,9 +32,12 @@ def test_conciliar_engine_sintetico():
 
 
 def _copia_temp(p: Path) -> str:
-    """Copia a temp para evitar el lock si el archivo está abierto en Excel."""
+    """Copia a temp para leer aunque esté abierto; si está bloqueado, se omite el test."""
     dst = Path(tempfile.gettempdir()) / ("t_" + p.name)
-    shutil.copy(p, dst)
+    try:
+        shutil.copy(p, dst)
+    except PermissionError:
+        pytest.skip(f"{p.name} está abierto en Excel (bloqueado)")
     return str(dst)
 
 

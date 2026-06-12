@@ -74,13 +74,43 @@ def _match_sheet(disponibles: list[str], mapa: dict[str, str]) -> dict[str, str]
         for patron, periodo in mapa.items():
             if real.replace(" ", "").lower() == patron.replace(" ", "").lower():
                 out[real] = periodo
-    # fallback: por palabra clave
-    if not out:
-        for real in disponibles:
-            low = real.lower()
-            if "enero" in low and "balance" not in low.replace("balance_enero", ""):
-                pass
     return out
+
+
+# Meses (ES) para inferir el periodo desde el nombre de hoja del export mensual de Siesa.
+_CO_MESES = {
+    "ener": "01", "febr": "02", "marz": "03", "abr": "04", "may": "05", "juni": "06",
+    "juli": "07", "agos": "08", "sept": "09", "octu": "10", "novi": "11", "dici": "12",
+}
+
+
+def _periodo_de_nombre(nombre: str, anio: str = "2026") -> str | None:
+    low = nombre.lower()
+    for k, mm in _CO_MESES.items():
+        if k in low:
+            return f"{anio}-{mm}"
+    return None
+
+
+def _detect_co_sheets(sheets: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Devuelve (hojas_balance, hojas_movimiento) -> periodo, soportando tanto el
+    formato consolidado fijo (Balance_Enero/Mvto_Enero…) como el export mensual de
+    Siesa con nombres variables ('Consulta_ Mayor y balances ENERO', 'Rept Mov.
+    Ctas. Aux'). El parser ya localiza la cabecera dinámicamente."""
+    bal = _match_sheet(sheets, _CO_SHEETS)
+    mov = _match_sheet(sheets, _CO_MVTO_SHEETS)
+    if bal or mov:
+        return bal, mov
+    # Export mensual: detectar por palabras clave + inferir el mes del nombre.
+    periodo = next((p for s in sheets if (p := _periodo_de_nombre(s))), None) or "2026-01"
+    bal2, mov2 = {}, {}
+    for s in sheets:
+        low = s.lower()
+        if "mov" in low or "aux" in low or "auxiliar" in low:
+            mov2[s] = periodo
+        elif "mayor" in low or "balance" in low or "consulta" in low or "saldos" in low:
+            bal2[s] = periodo
+    return bal2, mov2
 
 
 def ingest_espana(db: Session, path: str) -> dict:
@@ -120,10 +150,10 @@ def ingest_espana(db: Session, path: str) -> dict:
 
 def ingest_colombia(db: Session, path: str) -> dict:
     sis = _ensure_system(db, "Siesa", "CO", "siesa_xlsx")
-    matched = _match_sheet(_sheets(path), _CO_SHEETS)
-    if not matched:
-        raise ValueError(f"No se reconocieron hojas de Colombia. Hojas: {_sheets(path)}")
-    matched_mvto = _match_sheet(_sheets(path), _CO_MVTO_SHEETS)
+    sheets = _sheets(path)
+    matched, matched_mvto = _detect_co_sheets(sheets)
+    if not matched and not matched_mvto:
+        raise ValueError(f"No se reconocieron hojas de Colombia. Hojas: {sheets}")
     # Borrado quirúrgico: solo los periodos presentes (balance + movimientos), no todo el país.
     periodos = list(set(matched.values()) | set(matched_mvto.values()))
     db.execute(delete(AccountPeriod).where(AccountPeriod.pais == "CO", AccountPeriod.periodo.in_(periodos)))
@@ -340,8 +370,11 @@ def detectar_tipo(path: str) -> str | None:
         return "homologacion"
     if "clientes" in sheets and "proveedor" in sheets:
         return "terceros"
-    # 3) PYG Colombia (Siesa): Balance_/Mvto_ (antes que España para no chocar con 'mvto')
+    # 3) PYG Colombia (Siesa): Balance_/Mvto_ o el export mensual (Consulta_ Mayor y
+    #    balances… / Rept Mov. Ctas. Aux). Antes que España para no chocar con 'mvto'.
     if any(s.startswith("balance_") or s.startswith("mvto_") for s in sheets):
+        return "colombia"
+    if any(("mayor" in s and "balance" in s) or "ctas. aux" in s or "mov. ctas" in s for s in sheets):
         return "colombia"
     # 4) PYG España (Libro Mayor DELSOL): hojas Atenea…/DELSOL
     if any("delsol" in s or "atenea" in s for s in sheets):

@@ -17,6 +17,19 @@ def _session(tmp_path):
     return sessionmaker(bind=engine)
 
 
+def test_detect_co_sheets_export_mensual():
+    # Export mensual de Siesa (nombres variables) -> reconoce balance/mov y mes
+    bal, mov = ingest_svc._detect_co_sheets(["Consulta_ Mayor y balances ENER", "Rept Mov. Ctas. Aux"])
+    assert bal.get("Consulta_ Mayor y balances ENER") == "2026-01"
+    assert mov.get("Rept Mov. Ctas. Aux") == "2026-01"
+    # Febrero por nombre
+    bal_f, _ = ingest_svc._detect_co_sheets(["Consulta Mayor y balances FEBRERO", "Rept Mov Ctas Aux"])
+    assert list(bal_f.values()) == ["2026-02"]
+    # Formato consolidado fijo sigue funcionando
+    bal2, mov2 = ingest_svc._detect_co_sheets(["Balance_Enero", "Mvto_Enero", "Balance_Febrero-Marzo", "Mvto_Febrero-Marzo"])
+    assert bal2.get("Balance_Enero") == "2026-01" and mov2.get("Mvto_Enero") == "2026-01"
+
+
 def test_detectar_tipo(f_homologacion, f_colombia, f_espana, f_cartera):
     casos = [
         (f_espana, "espana"), (f_colombia, "colombia"),
