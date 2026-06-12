@@ -237,8 +237,13 @@ def test_anomalias(client):
     r = client.get("/api/anomalias")
     assert r.status_code == 200
     d = r.json()
-    assert set(d) >= {"sin_homologar", "grupos_atipicos", "multiples_grupos", "kpis"}
+    assert set(d) >= {"sin_homologar", "grupos_atipicos", "multiples_grupos", "cobertura", "kpis"}
     assert isinstance(d["sin_homologar"], list) and isinstance(d["grupos_atipicos"], list)
+    cob = d["cobertura"]
+    assert set(cob) >= {"huecos", "dobles", "kpis"}
+    # cada doble conteo lista >= 2 grupos que lo cubren
+    for x in cob["dobles"]:
+        assert len(x["grupos"]) >= 2
 
 
 def test_conflictos_multiples_grupos():

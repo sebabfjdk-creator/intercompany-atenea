@@ -170,15 +170,84 @@ def anomalias(db: Session, z_umbral: float = 2.0) -> dict:
 
     periodos = sorted({f.periodo for f in filas})
     multiples = config_service.cuentas_multiples_grupos(db)
+    cobertura = validacion_jerarquia(db)
     return {
         "sin_homologar": sin_homologar,
         "grupos_atipicos": grupos_atipicos,
         "multiples_grupos": multiples,
+        "cobertura": cobertura,
         "periodos": periodos,
         "nota_zscore": ("z-score transversal sobre grupos" if len(periodos) < 3
                         else "z-score temporal disponible"),
         "kpis": {"sin_homologar": len(sin_homologar), "grupos_atipicos": len(grupos_atipicos),
-                 "multiples_grupos": multiples["total"]},
+                 "multiples_grupos": multiples["total"],
+                 "huecos": cobertura["kpis"]["huecos"], "dobles": cobertura["kpis"]["dobles"]},
+    }
+
+
+def validacion_jerarquia(db: Session) -> dict:
+    """Validación de cobertura PYG consciente de la jerarquía de cuentas.
+
+    Trabaja sobre las HOJAS (cuentas más granulares con movimiento real); cada hoja
+    debe estar cubierta por EXACTAMENTE un código homologado (ella misma o un
+    ancestro/wildcard). 0 cobertura = hueco real (no entra a Comparativa);
+    ≥2 = doble conteo (p.ej. padre e hijo mapeados, o wildcard que pisa)."""
+    from collections import defaultdict
+
+    from domain.reconciliacion import valor_periodo
+
+    filas = db.scalars(select(AccountPeriod)).all()
+    val: dict[tuple, float] = defaultdict(float)
+    nombre: dict[tuple, str] = {}
+    codes: dict[str, set] = {"CO": set(), "ES": set()}
+    for f in filas:
+        k = (f.pais, f.codigo)
+        val[k] += valor_periodo(f.pais, f.codigo, float(f.debe), float(f.haber))
+        codes[f.pais].add(f.codigo)
+        if f.nombre:
+            nombre[k] = f.nombre
+
+    co_map, es_map = _codigos_homologados(db)
+
+    def mapeos(pais: str, code: str) -> list[str]:
+        mp = co_map if pais == "CO" else es_map
+        out = []
+        for m in mp:
+            if m and m[-1] in ("x", "X", "*"):
+                if code.startswith(m[:-1]):
+                    out.append(m)
+            elif m == code or code.startswith(m):  # exacto o ancestro
+                out.append(m)
+        return sorted(set(out))
+
+    def es_hoja(code: str, universo: set) -> bool:
+        return not any(o != code and o.startswith(code) for o in universo)
+
+    huecos, dobles = [], []
+    for pais in ("CO", "ES"):
+        for code in codes[pais]:
+            clase = code[:1]
+            es_pyg = (pais == "CO" and clase in ("4", "5")) or (pais == "ES" and clase in ("6", "7"))
+            if not es_pyg or not es_hoja(code, codes[pais]):
+                continue
+            v = round(val[(pais, code)], 2)
+            if abs(v) < 1:
+                continue
+            ms = mapeos(pais, code)
+            row = {"pais": pais, "codigo": code, "nombre": nombre.get((pais, code), ""), "valor": v}
+            if not ms:
+                huecos.append(row)
+            elif len(ms) >= 2:
+                dobles.append({**row, "grupos": ms})
+    huecos.sort(key=lambda x: -abs(x["valor"]))
+    dobles.sort(key=lambda x: -abs(x["valor"]))
+    return {
+        "huecos": huecos, "dobles": dobles,
+        "kpis": {
+            "huecos": len(huecos), "dobles": len(dobles),
+            "monto_huecos": round(sum(abs(h["valor"]) for h in huecos), 2),
+            "monto_dobles": round(sum(abs(d["valor"]) for d in dobles), 2),
+        },
     }
 
 

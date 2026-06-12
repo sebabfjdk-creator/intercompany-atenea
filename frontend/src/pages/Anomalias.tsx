@@ -6,7 +6,9 @@ interface Grupo { grupo: string; tipo: string; diferencia: number; z: number }
 interface Cuenta { pais: string; codigo: string; nombre: string; valor: number }
 interface Conflicto { codigo: string; grupos: string[] }
 interface Multiples { colombia: Conflicto[]; espana: Conflicto[]; total: number }
-interface Resp { sin_homologar: Cuenta[]; grupos_atipicos: Grupo[]; multiples_grupos: Multiples; periodos: string[]; nota_zscore: string; kpis: { sin_homologar: number; grupos_atipicos: number; multiples_grupos: number } }
+interface CobItem { pais: string; codigo: string; nombre: string; valor: number; grupos?: string[] }
+interface Cobertura { huecos: CobItem[]; dobles: CobItem[]; kpis: { huecos: number; dobles: number; monto_huecos: number; monto_dobles: number } }
+interface Resp { sin_homologar: Cuenta[]; grupos_atipicos: Grupo[]; multiples_grupos: Multiples; cobertura: Cobertura; periodos: string[]; nota_zscore: string; kpis: { sin_homologar: number; grupos_atipicos: number; multiples_grupos: number; huecos: number; dobles: number } }
 
 export default function Anomalias() {
   const { data, loading, error, reload } = useFetch<Resp>("/api/anomalias");
@@ -22,6 +24,56 @@ export default function Anomalias() {
               <Kpi label="Cuentas en >1 grupo" value={data.kpis.multiples_grupos} tone="red" hint="doble conteo" />
               <Kpi label="Periodos analizados" value={data.periodos.length} hint={data.nota_zscore} />
             </div>
+
+            {data.cobertura && (data.cobertura.kpis.huecos > 0 || data.cobertura.kpis.dobles > 0) && (
+              <Card title="🔎 Validación de cobertura PYG (consciente de jerarquía)" className="mb-4">
+                <p className="text-xs text-slate-500 mb-3">
+                  Sobre las <b>cuentas hoja</b> (movimiento real) de clases 4/5 (CO) y 6/7 (ES). Cada hoja debe estar
+                  cubierta por <b>un solo</b> código homologado. <b>Hueco</b> = no entra a Comparativa; <b>doble conteo</b> =
+                  cubierta por padre e hijo, o por wildcard que pisa.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-2 gap-4 mb-3">
+                  <Kpi label="Huecos (sin contar)" value={data.cobertura.kpis.huecos} tone="amber" hint={fmtCOP(data.cobertura.kpis.monto_huecos)} />
+                  <Kpi label="Dobles conteos" value={data.cobertura.kpis.dobles} tone="red" hint={fmtCOP(data.cobertura.kpis.monto_dobles)} />
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase text-amber-600 mb-1">Huecos — movimiento sin homologar</div>
+                    {data.cobertura.huecos.length === 0 ? <p className="text-sm text-emerald-600">Sin huecos. ✓</p> : (
+                      <div className="overflow-auto max-h-[40vh]">
+                        <table className="w-full text-sm">
+                          <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white"><tr><th className="text-left py-1">País</th><th className="text-left">Cuenta</th><th className="text-left">Nombre</th><th className="text-right">Valor</th></tr></thead>
+                          <tbody>{data.cobertura.huecos.map((c, i) => (
+                            <tr key={i} className="border-t border-slate-100">
+                              <td className="py-1">{c.pais}</td><td className="font-mono text-xs">{c.codigo}</td>
+                              <td className="max-w-[160px] truncate" title={c.nombre}>{c.nombre || "—"}</td>
+                              <td className="text-right tabular-nums">{fmtCOP(c.valor)}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase text-red-600 mb-1">Dobles conteos</div>
+                    {data.cobertura.dobles.length === 0 ? <p className="text-sm text-emerald-600">Sin dobles conteos. ✓</p> : (
+                      <div className="overflow-auto max-h-[40vh]">
+                        <table className="w-full text-sm">
+                          <thead className="text-xs uppercase text-slate-400 sticky top-0 bg-white"><tr><th className="text-left py-1">Cuenta</th><th className="text-right">Valor</th><th className="text-left">Cubierta por</th></tr></thead>
+                          <tbody>{data.cobertura.dobles.map((c, i) => (
+                            <tr key={i} className="border-t border-slate-100 align-top">
+                              <td className="py-1 font-mono text-xs whitespace-nowrap">{c.pais} {c.codigo}</td>
+                              <td className="text-right tabular-nums">{fmtCOP(c.valor)}</td>
+                              <td className="text-xs">{(c.grupos ?? []).join(" · ")}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
 
             {data.multiples_grupos.total > 0 && (
               <Card title="⚠️ Cuentas homologadas en más de un grupo (doble conteo)" className="mb-4">
