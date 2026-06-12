@@ -113,6 +113,15 @@ def cerrar(db: Session, mes: str, usuario_id=None) -> dict:
     return {"ok": True, "mes": mes, "estado": "cerrada"}
 
 
+def reabrir(db: Session, mes: str, usuario_id=None) -> dict:
+    acc = _account(db)
+    p = _period(db, acc.id, mes)
+    p.estado = "pendiente"
+    p.fecha_cierre = None
+    db.commit()
+    return {"ok": True, "mes": mes, "estado": "pendiente"}
+
+
 def periodos(db: Session) -> list[dict]:
     acc = db.scalars(select(BankAccount)).first()
     if not acc:

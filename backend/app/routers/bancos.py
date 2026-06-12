@@ -94,6 +94,15 @@ def cerrar(mes: str = Query(...), db: Session = Depends(get_db), user: User = De
     return res
 
 
+@router.post("/reabrir")
+def reabrir(mes: str = Query(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _puede_escribir(db, user)
+    res = svc.reabrir(db, mes, user.id)
+    db.add(AuditLog(entidad="banco", entidad_id=mes, accion="update", valor_despues="reabierta", usuario_id=user.id))
+    db.commit()
+    return res
+
+
 def _money(ws, cell):
     ws[cell].number_format = "#,##0.00;[Red]-#,##0.00"
 

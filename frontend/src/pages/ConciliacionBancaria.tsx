@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 import { api, descargarArchivo } from "../api";
 import { useFetch } from "../lib/useFetch";
@@ -54,16 +54,31 @@ export default function ConciliacionBancaria() {
   const { data, loading, error, reload } = useFetch<Recon>("/api/bancos/conciliacion");
   const [sc, setSc] = useState("");
   const [sb, setSb] = useState("");
+  const [savingS, setSavingS] = useState(false);
   const vacio = !!data?.vacio;
+
+  // precargar las casillas con los saldos iniciales actuales al cargar/cambiar de mes
+  useEffect(() => {
+    if (data && !data.vacio) {
+      setSc(String(data.bloque_contable.inicial));
+      setSb(String(data.bloque_banco.inicial));
+    }
+  }, [data?.mes, data?.bloque_contable.inicial, data?.bloque_banco.inicial]);
 
   async function guardarSaldos() {
     if (!data) return;
-    await api.put("/api/bancos/saldos", { mes: data.mes, saldo_contable: Number(sc || 0), saldo_banco: Number(sb || 0) });
-    reload();
+    setSavingS(true);
+    try { await api.put("/api/bancos/saldos", { mes: data.mes, saldo_contable: Number(sc || 0), saldo_banco: Number(sb || 0) }); reload(); }
+    catch (e: any) { alert(typeof e?.response?.data?.detail === "string" ? e.response.data.detail : "Error al guardar"); }
+    finally { setSavingS(false); }
   }
   async function cerrar() {
     if (!data || !window.confirm(`¿Cerrar la conciliación de ${data.mes}? Quedará como definitiva.`)) return;
     await api.post(`/api/bancos/cerrar?mes=${data.mes}`); reload();
+  }
+  async function reabrir() {
+    if (!data) return;
+    await api.post(`/api/bancos/reabrir?mes=${data.mes}`); reload();
   }
 
   const colsC = useMemo<ColDef[]>(() => [
@@ -82,7 +97,9 @@ export default function ConciliacionBancaria() {
         action={data && !vacio ? (
           <div className="flex gap-2">
             <button onClick={() => descargarArchivo("/api/bancos/export", "conciliacion.xlsx")} className="px-3 py-1.5 text-sm border rounded text-slate-600">📥 Exportar</button>
-            {data.estado !== "cerrada" && <button onClick={cerrar} className="px-3 py-1.5 text-sm bg-co text-white rounded">Cerrar conciliación</button>}
+            {data.estado !== "cerrada"
+              ? <button onClick={cerrar} className="px-3 py-1.5 text-sm bg-co text-white rounded">Cerrar conciliación</button>
+              : <button onClick={reabrir} className="px-3 py-1.5 text-sm border border-amber-300 text-amber-700 rounded">Reabrir</button>}
           </div>
         ) : null} />
 
@@ -123,16 +140,17 @@ export default function ConciliacionBancaria() {
               </Card>
             </div>
 
-            {/* Saldos iniciales editables */}
-            {data.estado !== "cerrada" && (
-              <Card title="Saldos iniciales del mes (entrada manual)" className="mb-4">
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="text-sm">Saldo contable inicial<br /><input value={sc} onChange={(e) => setSc(e.target.value)} placeholder={String(data.bloque_contable.inicial)} className="border rounded px-2 py-1 text-sm mt-1 w-44" /></label>
-                  <label className="text-sm">Saldo bancario inicial<br /><input value={sb} onChange={(e) => setSb(e.target.value)} placeholder={String(data.bloque_banco.inicial)} className="border rounded px-2 py-1 text-sm mt-1 w-44" /></label>
-                  <button onClick={guardarSaldos} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded">Guardar saldos</button>
-                </div>
-              </Card>
-            )}
+            {/* Saldos iniciales editables (siempre disponibles) */}
+            <Card title="Saldos iniciales del mes (entrada manual)" className="mb-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-sm">Saldo contable inicial<br />
+                  <input type="number" step="0.01" value={sc} onChange={(e) => setSc(e.target.value)} className="border rounded px-2 py-1 text-sm mt-1 w-44" /></label>
+                <label className="text-sm">Saldo bancario inicial<br />
+                  <input type="number" step="0.01" value={sb} onChange={(e) => setSb(e.target.value)} className="border rounded px-2 py-1 text-sm mt-1 w-44" /></label>
+                <button onClick={guardarSaldos} disabled={savingS} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded disabled:opacity-50">{savingS ? "Guardando…" : "Guardar saldos"}</button>
+                {data.estado === "cerrada" && <span className="text-xs text-amber-600">La conciliación está cerrada; al guardar se recalculará igualmente.</span>}
+              </div>
+            </Card>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <Kpi label="Mov. contables" value={data.kpis.contable} />
