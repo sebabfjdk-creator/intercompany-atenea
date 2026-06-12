@@ -332,6 +332,7 @@ class PygMovimiento(Base):
     periodo: Mapped[str] = mapped_column(String(10))
     fecha: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     concepto: Mapped[str] = mapped_column(Text, default="")
+    nit: Mapped[str] = mapped_column(String(40), default="", index=True)  # tercero (split intercompany)
     debe: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
     haber: Mapped[float] = mapped_column(Numeric(20, 2), default=0)
 

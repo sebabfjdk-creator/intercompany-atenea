@@ -13,7 +13,7 @@ interface Comp {
   kpis: { grupos: number; cruces: number; conciliados: number; excepciones: number; dif_total_abs: number };
 }
 interface CtaDet { cuenta: string; nombre: string; valores: Record<string, number> }
-interface Detalle { colombia: CtaDet[]; espana: CtaDet[]; total_co: Record<string, number>; total_es: Record<string, number>; periodos: string[] }
+interface Detalle { colombia: CtaDet[]; espana: CtaDet[]; total_co: Record<string, number>; total_es: Record<string, number>; periodos: string[]; nit_filtro?: string }
 interface MovTx { cuenta: string; periodo: string; fecha: string | null; concepto: string; debe: number; haber: number }
 
 export default function Comparativa() {
@@ -45,14 +45,16 @@ export default function Comparativa() {
     setExp(new Set(data.filas.map((f) => f.grupo)));
     data.filas.forEach((f) => cargar(f.grupo));
   }
-  async function toggleMov(pais: "CO" | "ES", cuenta: string) {
-    const key = `${pais}:${cuenta}`;
+  async function toggleMov(pais: "CO" | "ES", cuenta: string, nit = "") {
+    const key = `${pais}:${cuenta}:${nit}`;
     const abrir = !movExp.has(key);
     setMovExp((s) => { const n = new Set(s); abrir ? n.add(key) : n.delete(key); return n; });
     if (abrir && !movCache[key]) {
       setMovCache((c) => ({ ...c, [key]: "loading" }));
       try {
-        const { data: r } = await api.get("/api/comparativa/movimientos-cuenta", { params: { pais, cuenta } });
+        const params: any = { pais, cuenta };
+        if (nit) params.nit = nit;
+        const { data: r } = await api.get("/api/comparativa/movimientos-cuenta", { params });
         setMovCache((c) => ({ ...c, [key]: r.items as MovTx[] }));
       } catch { setMovCache((c) => ({ ...c, [key]: [] })); }
     }
@@ -60,8 +62,9 @@ export default function Comparativa() {
 
   const nCols = data ? 2 + data.periodos.length * 3 : 0;
 
-  function SubTabla({ titulo, rows, totales, periodos, lado }: { titulo: string; rows: CtaDet[]; totales: Record<string, number>; periodos: string[]; lado: "co" | "es" }) {
+  function SubTabla({ titulo, rows, totales, periodos, lado, nitFiltro = "" }: { titulo: string; rows: CtaDet[]; totales: Record<string, number>; periodos: string[]; lado: "co" | "es"; nitFiltro?: string }) {
     const pais = lado === "co" ? "CO" : "ES";
+    const nit = lado === "co" ? nitFiltro : "";  // el filtro por NIT (intercompany) aplica solo a CO
     const subCols = 3 + periodos.length;
     return (
       <div className="mb-2">
@@ -72,14 +75,14 @@ export default function Comparativa() {
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const key = `${pais}:${r.cuenta}`;
+              const key = `${pais}:${r.cuenta}:${nit}`;
               const abierto = movExp.has(key);
               const movs = movCache[key];
               return (
                 <Fragment key={r.cuenta + i}>
                   <tr className="hover:bg-white/60">
                     <td className="text-center">
-                      <button onClick={() => toggleMov(pais, r.cuenta)} className="w-4 h-4 rounded border text-[10px] text-slate-500 hover:bg-slate-100" title="Ver movimientos">{abierto ? "−" : "+"}</button>
+                      <button onClick={() => toggleMov(pais, r.cuenta, nit)} className="w-4 h-4 rounded border text-[10px] text-slate-500 hover:bg-slate-100" title="Ver movimientos">{abierto ? "−" : "+"}</button>
                     </td>
                     <td className="px-2 py-0.5 font-mono">{r.cuenta}</td>
                     <td className="max-w-[200px] truncate" title={r.nombre}>{r.nombre || "—"}</td>
@@ -204,7 +207,7 @@ function FilaGrupo({ f, periodos, abierto, cargando, det, nCols, onToggle, SubTa
           <td colSpan={nCols} className="px-6 py-3 border-b border-slate-100">
             {cargando && !det ? <div className="text-slate-400 text-xs">Cargando detalle…</div> : det ? (
               <div className="border-l-2 border-slate-200 pl-3">
-                <SubTabla titulo="Colombia" rows={det.colombia} totales={det.total_co} periodos={periodos} lado="co" />
+                <SubTabla titulo="Colombia" rows={det.colombia} totales={det.total_co} periodos={periodos} lado="co" nitFiltro={det.nit_filtro} />
                 <SubTabla titulo="España" rows={det.espana} totales={det.total_es} periodos={periodos} lado="es" />
               </div>
             ) : <div className="text-slate-400 text-xs">Sin detalle.</div>}

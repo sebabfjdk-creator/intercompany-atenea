@@ -15,10 +15,13 @@ settings = get_settings()
 
 
 def _resultados(db: Session):
+    from app.services.ingest import ic_porcion_co
     grupos = config_service.grupos_homologados(db)
     abs_cop, pct = config_service.get_tolerancia(db)
     filas = db.scalars(select(AccountPeriod)).all()
-    return cruzar_pyg_periodos(grupos, filas, abs_cop, pct)
+    porcion, group_codes = ic_porcion_co(db)
+    return cruzar_pyg_periodos(grupos, filas, abs_cop, pct,
+                               ic_porcion=porcion, ic_group_codes=group_codes)
 
 
 def comparativa(db: Session) -> dict:
@@ -251,14 +254,18 @@ def validacion_jerarquia(db: Session) -> dict:
     }
 
 
-def movimientos_cuenta(db: Session, pais: str, cuenta: str, periodo: str | None = None) -> dict:
+def movimientos_cuenta(db: Session, pais: str, cuenta: str, periodo: str | None = None,
+                       nit: str | None = None) -> dict:
     """Transacciones individuales de una cuenta (trazabilidad Grupo→Cuenta→Transacción).
-    Match por prefijo: cubre cuentas jerárquicas CO (510570 -> 51057001) y wildcard ES."""
+    Match por prefijo: cubre cuentas jerárquicas CO (510570 -> 51057001) y wildcard ES.
+    Si se pasa `nit`, filtra solo ese tercero (rubros intercompany)."""
     from db.models import PygMovimiento
     pref = cuenta[:-1] if (cuenta and cuenta[-1] in ("x", "X", "*")) else cuenta
     q = select(PygMovimiento).where(PygMovimiento.pais == pais, PygMovimiento.codigo.startswith(pref))
     if periodo:
         q = q.where(PygMovimiento.periodo == periodo)
+    if nit:
+        q = q.where(PygMovimiento.nit == nit)
     movs = db.scalars(q.order_by(PygMovimiento.fecha)).all()
     items = [{
         "cuenta": m.codigo, "periodo": m.periodo,
@@ -307,12 +314,26 @@ def detalle_grupo(db: Session, grupo: str) -> dict:
     co = expandir("CO", g.cuentas_co)
     es = expandir("ES", g.cuentas_es)
 
+    # Split intercompany por NIT: el rubro IC muestra solo su porción; los demás, el resto.
+    from app.services.ingest import _INTERCOMPANY, ic_porcion_co
+    porcion, group_codes = ic_porcion_co(db)
+    es_ic = grupo in group_codes
+    nit_filtro = next((ic["nit"] for ic in _INTERCOMPANY if ic["grupo"] == grupo), "") if es_ic else ""
+    for acc in co:
+        code = acc["cuenta"]
+        for p in periodos:
+            ic = porcion.get((p, code), 0.0)
+            if es_ic:
+                acc["valores"][p] = round(ic, 2)                       # IC: solo la porción del NIT
+            elif ic:
+                acc["valores"][p] = round(acc["valores"].get(p, 0.0) - ic, 2)  # resto en su grupo
+
     def totales(rows):
         return {p: round(sum(r["valores"].get(p, 0.0) for r in rows), 2) for p in periodos}
 
     return {
         "grupo": grupo, "tipo": g.tipo, "periodos": periodos,
-        "colombia": co, "espana": es,
+        "colombia": co, "espana": es, "nit_filtro": nit_filtro,
         "total_co": totales(co), "total_es": totales(es), "encontrado": True,
     }
 

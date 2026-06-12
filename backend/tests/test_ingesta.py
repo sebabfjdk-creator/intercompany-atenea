@@ -32,13 +32,32 @@ def test_consolidacion_net_real(tmp_path, f_homologacion):
         assert set(ing.cuentas_es) == {"700.0.0.101"} and ing.tipo == "ingreso"
         assert set(gas.cuentas_co) == {"51351501", "51351503", "51352001", "515505", "515595", "51950505"}
         assert set(gas.cuentas_es) == {"602.0.0.101", "602.0.0.103", "629.0.0.100"} and gas.tipo == "gasto"
-        # ninguna cuenta NET REAL queda en OTRO grupo (sin doble conteo)
+        # ES dedicado: se quita de otros grupos. CO compartido: PERMANECE (el motor separa por NIT).
         for nombre, g in gh.items():
             if nombre.startswith("NET REAL"):
                 continue
-            assert "51352001" not in g.cuentas_co, f"51352001 duplicada en {nombre}"
-            assert "41553503" not in g.cuentas_co
-            assert "700.0.0.101" not in g.cuentas_es
+            assert "700.0.0.101" not in g.cuentas_es, f"ES NET REAL no debe estar en {nombre}"
+
+
+def test_split_intercompany_motor():
+    """El rubro IC toma solo la porción del NIT; la cuenta compartida deja el resto en su grupo."""
+    from domain.reconciliacion import cruzar_pyg_periodos
+    from ingestion.homologacion import GrupoHomologado
+
+    class F:
+        def __init__(s, p, c, per, d, h):
+            s.pais, s.codigo, s.periodo, s.debe, s.haber = p, c, per, d, h
+    filas = [F("CO", "51950505", "2026-01", 100.0, 0.0), F("ES", "602.0.0.101", "2026-01", 30.0, 0.0)]
+    grupos = [
+        GrupoHomologado("NET REAL - Gastos", "gasto", ["51950505"], ["602.0.0.101"]),
+        GrupoHomologado("Otros", "gasto", ["51950505"], []),
+    ]
+    res = cruzar_pyg_periodos(grupos, filas, ic_porcion={("2026-01", "51950505"): 80.0},
+                              ic_group_codes={"NET REAL - Gastos": {"51950505"}})
+    by = {r.grupo: r for r in res}
+    assert by["NET REAL - Gastos"].total_co == 80.0   # solo la porción del NIT
+    assert by["Otros"].total_co == 20.0               # el resto
+    assert by["NET REAL - Gastos"].total_es == 30.0
 
 
 def test_detect_co_sheets_export_mensual():

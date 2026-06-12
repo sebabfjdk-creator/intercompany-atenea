@@ -80,9 +80,9 @@ def detalle_grupo(grupo: str, db: Session = Depends(get_db), _: User = Depends(g
 
 
 @router.get("/comparativa/movimientos-cuenta")
-def movimientos_cuenta(pais: str, cuenta: str, periodo: str | None = None,
+def movimientos_cuenta(pais: str, cuenta: str, periodo: str | None = None, nit: str | None = None,
                        db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return queries.movimientos_cuenta(db, pais, cuenta, periodo)
+    return queries.movimientos_cuenta(db, pais, cuenta, periodo, nit)
 
 
 @router.get("/comparativa")

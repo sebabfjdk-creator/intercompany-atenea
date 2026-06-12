@@ -181,7 +181,8 @@ def ingest_colombia(db: Session, path: str) -> dict:
             if m.referencia:
                 concepto = f"{concepto} · {m.referencia}".strip(" ·")
             db.add(PygMovimiento(pais="CO", codigo=m.cuenta, periodo=periodo, fecha=m.fecha,
-                                 concepto=concepto[:500], debe=round(m.debito, 2), haber=round(m.credito, 2)))
+                                 concepto=concepto[:500], nit=str(m.nit or "")[:40],
+                                 debe=round(m.debito, 2), haber=round(m.credito, 2)))
             nmov += 1
     _record_batch(db, sis.id, _hash_file(path), n)
     db.commit()
@@ -191,28 +192,29 @@ def ingest_colombia(db: Session, path: str) -> dict:
 # Consolidación de terceros intercompany "grandes": fuerza estas cuentas a un único
 # grupo (Ingresos/Gastos), quitándolas de cualquier otro grupo (evita doble conteo).
 # Se aplica tras cargar la homologación, así que sobrevive a re-cargas del Excel.
+# Terceros intercompany grandes: rubro propio (Ingresos/Gastos) filtrado por NIT.
+# CO: las cuentas son COMPARTIDAS -> el motor separa por NIT (la cuenta se queda en
+# su grupo original con el resto). ES: las cuentas son DEDICADAS al tercero -> se
+# quitan de otros grupos y van completas al rubro intercompany.
 _INTERCOMPANY = [
-    {"grupo": "NET REAL SOLUTIONS - Ingresos", "tipo": "ingreso",
+    {"grupo": "NET REAL SOLUTIONS - Ingresos", "tipo": "ingreso", "nit": "B12550877",
      "co": ["41553503", "42102005"], "es": ["700.0.0.101"]},
-    {"grupo": "NET REAL SOLUTIONS - Gastos", "tipo": "gasto",
+    {"grupo": "NET REAL SOLUTIONS - Gastos", "tipo": "gasto", "nit": "B12550877",
      "co": ["51351501", "51351503", "51352001", "515505", "515595", "51950505"],
      "es": ["602.0.0.101", "602.0.0.103", "629.0.0.100"]},
 ]
 
 
 def _consolidar_intercompany(grupos: list) -> list:
-    """Quita las cuentas intercompany de todos los grupos y crea/recrea sus grupos
-    dedicados, de modo que cada cuenta quede en un único rubro."""
     from ingestion.homologacion import GrupoHomologado
-    ic_co = {c for ic in _INTERCOMPANY for c in ic["co"]}
     ic_es = {c for ic in _INTERCOMPANY for c in ic["es"]}
     nombres_ic = {ic["grupo"] for ic in _INTERCOMPANY}
     out = []
     for g in grupos:
         if g.grupo in nombres_ic:
             continue  # se reconstruye abajo
-        co = [c for c in g.cuentas_co if c not in ic_co]
-        es = [c for c in g.cuentas_es if c not in ic_es]
+        es = [c for c in g.cuentas_es if c not in ic_es]   # ES dedicado: quitar de otros grupos
+        co = list(g.cuentas_co)                              # CO compartido: NO quitar (split por NIT)
         if co or es:
             out.append(GrupoHomologado(grupo=g.grupo, tipo=g.tipo, cuentas_co=co,
                                        cuentas_es=es, descripcion=g.descripcion))
@@ -221,6 +223,33 @@ def _consolidar_intercompany(grupos: list) -> list:
                                    cuentas_co=list(ic["co"]), cuentas_es=list(ic["es"]),
                                    descripcion="intercompany"))
     return out
+
+
+def ic_porcion_co(db: Session) -> tuple[dict, dict]:
+    """Porción CO de los terceros intercompany por (periodo, codigo), desde
+    pyg_movimiento filtrado por NIT. Devuelve (porcion, group_codes)."""
+    from sqlalchemy import func as _func
+
+    from db.models import PygMovimiento
+    from domain.reconciliacion import valor_periodo
+    code_nit = {c: ic["nit"] for ic in _INTERCOMPANY for c in ic["co"]}
+    group_codes = {ic["grupo"]: set(ic["co"]) for ic in _INTERCOMPANY}
+    if not code_nit:
+        return {}, group_codes
+    rows = db.execute(
+        select(PygMovimiento.periodo, PygMovimiento.codigo, PygMovimiento.nit,
+               _func.coalesce(_func.sum(PygMovimiento.debe), 0),
+               _func.coalesce(_func.sum(PygMovimiento.haber), 0))
+        .where(PygMovimiento.pais == "CO",
+               PygMovimiento.codigo.in_(list(code_nit)),
+               PygMovimiento.nit.in_(list(set(code_nit.values()))))
+        .group_by(PygMovimiento.periodo, PygMovimiento.codigo, PygMovimiento.nit)
+    ).all()
+    porcion: dict[tuple, float] = {}
+    for periodo, codigo, nit, sdeb, shaber in rows:
+        if code_nit.get(codigo) == nit:
+            porcion[(periodo, codigo)] = round(valor_periodo("CO", codigo, float(sdeb), float(shaber)), 2)
+    return porcion, group_codes
 
 
 def ingest_homologacion(db: Session, path: str) -> dict:

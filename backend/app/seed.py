@@ -22,6 +22,7 @@ from db.models import SourceSystem, User
 _PG_ALTERS = [
     "ALTER TABLE arap_movimiento ADD COLUMN IF NOT EXISTS documento VARCHAR(60) DEFAULT ''",
     "ALTER TABLE arap_movimiento ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(20) DEFAULT ''",
+    "ALTER TABLE pyg_movimiento ADD COLUMN IF NOT EXISTS nit VARCHAR(40) DEFAULT ''",
 ]
 
 

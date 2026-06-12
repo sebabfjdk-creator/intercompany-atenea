@@ -91,12 +91,18 @@ def _suma_codigos(idx_periodo: dict, codes) -> float:
     return total
 
 
-def _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct) -> list[ResultadoConciliacion]:
+def _cruzar(grupos, co_idx, es_idx, tol_abs, tol_pct, ic_porcion=None, ic_group_codes=None) -> list[ResultadoConciliacion]:
+    ic_porcion = ic_porcion or {}
+    ic_group_codes = ic_group_codes or {}
     periodos = sorted(set(co_idx) & set(es_idx))
     resultados: list[ResultadoConciliacion] = []
     for g in grupos:
         for periodo in periodos:
-            total_co = round(_suma_codigos(co_idx[periodo], g.cuentas_co), 2)
+            if g.grupo in ic_group_codes:
+                # Rubro intercompany: solo la porción del NIT (no toda la cuenta compartida).
+                total_co = round(sum(ic_porcion.get((periodo, c), 0.0) for c in g.cuentas_co), 2)
+            else:
+                total_co = round(_suma_codigos(co_idx[periodo], g.cuentas_co), 2)
             total_es = round(_suma_codigos(es_idx[periodo], g.cuentas_es), 2)
             dif, pct, estado = _estado(total_co, total_es, tol_abs, tol_pct)
             resultados.append(ResultadoConciliacion(
@@ -120,8 +126,12 @@ def cruzar_pyg_periodos(
     filas,  # iterable de objetos/tuplas con (pais, codigo, periodo, debe, haber)
     tol_abs: float = 1000.0,
     tol_pct: float = 0.005,
+    ic_porcion: dict | None = None,       # {(periodo, codigo): valor_NIT} intercompany CO
+    ic_group_codes: dict | None = None,   # {grupo_nombre: set(codigos_co)}
 ) -> list[ResultadoConciliacion]:
-    """Variante que cruza desde filas AccountPeriod (BD)."""
+    """Variante que cruza desde filas AccountPeriod (BD). Si se pasan ic_porcion /
+    ic_group_codes, separa la porción del tercero intercompany: el rubro IC toma solo
+    esa porción y la cuenta compartida queda en su grupo original con el resto."""
     from collections import defaultdict
     co_idx: dict[str, dict[str, float]] = defaultdict(dict)
     es_idx: dict[str, dict[str, float]] = defaultdict(dict)
@@ -133,7 +143,11 @@ def cruzar_pyg_periodos(
         haber = float(r.haber if hasattr(r, "haber") else r[4])
         v = valor_periodo(pais, codigo, debe, haber)
         (co_idx if pais == "CO" else es_idx)[periodo][codigo] = v
-    return _cruzar(grupos, dict(co_idx), dict(es_idx), tol_abs, tol_pct)
+    # Resta la porción intercompany del índice CO (queda el resto para el grupo original).
+    for (periodo, codigo), val in (ic_porcion or {}).items():
+        if periodo in co_idx and codigo in co_idx[periodo]:
+            co_idx[periodo][codigo] = round(co_idx[periodo][codigo] - val, 2)
+    return _cruzar(grupos, dict(co_idx), dict(es_idx), tol_abs, tol_pct, ic_porcion, ic_group_codes)
 
 
 def causa_sugerida(r: ResultadoConciliacion) -> str | None:
