@@ -188,9 +188,44 @@ def ingest_colombia(db: Session, path: str) -> dict:
     return {"tipo": "colombia", "periodos": sorted(set(matched.values())), "cuentas": n, "movimientos": nmov}
 
 
+# Consolidación de terceros intercompany "grandes": fuerza estas cuentas a un único
+# grupo (Ingresos/Gastos), quitándolas de cualquier otro grupo (evita doble conteo).
+# Se aplica tras cargar la homologación, así que sobrevive a re-cargas del Excel.
+_INTERCOMPANY = [
+    {"grupo": "NET REAL SOLUTIONS - Ingresos", "tipo": "ingreso",
+     "co": ["41553503", "42102005"], "es": ["700.0.0.101"]},
+    {"grupo": "NET REAL SOLUTIONS - Gastos", "tipo": "gasto",
+     "co": ["51351501", "51351503", "51352001", "515505", "515595", "51950505"],
+     "es": ["602.0.0.101", "602.0.0.103", "629.0.0.100"]},
+]
+
+
+def _consolidar_intercompany(grupos: list) -> list:
+    """Quita las cuentas intercompany de todos los grupos y crea/recrea sus grupos
+    dedicados, de modo que cada cuenta quede en un único rubro."""
+    from ingestion.homologacion import GrupoHomologado
+    ic_co = {c for ic in _INTERCOMPANY for c in ic["co"]}
+    ic_es = {c for ic in _INTERCOMPANY for c in ic["es"]}
+    nombres_ic = {ic["grupo"] for ic in _INTERCOMPANY}
+    out = []
+    for g in grupos:
+        if g.grupo in nombres_ic:
+            continue  # se reconstruye abajo
+        co = [c for c in g.cuentas_co if c not in ic_co]
+        es = [c for c in g.cuentas_es if c not in ic_es]
+        if co or es:
+            out.append(GrupoHomologado(grupo=g.grupo, tipo=g.tipo, cuentas_co=co,
+                                       cuentas_es=es, descripcion=g.descripcion))
+    for ic in _INTERCOMPANY:
+        out.append(GrupoHomologado(grupo=ic["grupo"], tipo=ic["tipo"],
+                                   cuentas_co=list(ic["co"]), cuentas_es=list(ic["es"]),
+                                   descripcion="intercompany"))
+    return out
+
+
 def ingest_homologacion(db: Session, path: str) -> dict:
     db.execute(delete(AccountMapping))
-    grupos = load_homologacion(path)
+    grupos = _consolidar_intercompany(load_homologacion(path))
     n = 0
     for g in grupos:
         # una fila por par CO×ES (o por cuenta suelta) para account_mapping

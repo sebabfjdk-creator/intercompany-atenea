@@ -17,6 +17,30 @@ def _session(tmp_path):
     return sessionmaker(bind=engine)
 
 
+def test_consolidacion_net_real(tmp_path, f_homologacion):
+    if not f_homologacion.exists():
+        pytest.skip("falta homologacion")
+    from app.services import config_service
+    S = _session(tmp_path)
+    with S() as db:
+        ingest_svc.ingest_homologacion(db, str(f_homologacion))
+        gh = {g.grupo: g for g in config_service.grupos_homologados(db)}
+        ing = gh.get("NET REAL SOLUTIONS - Ingresos")
+        gas = gh.get("NET REAL SOLUTIONS - Gastos")
+        assert ing and gas, "faltan los rubros NET REAL"
+        assert set(ing.cuentas_co) == {"41553503", "42102005"}
+        assert set(ing.cuentas_es) == {"700.0.0.101"} and ing.tipo == "ingreso"
+        assert set(gas.cuentas_co) == {"51351501", "51351503", "51352001", "515505", "515595", "51950505"}
+        assert set(gas.cuentas_es) == {"602.0.0.101", "602.0.0.103", "629.0.0.100"} and gas.tipo == "gasto"
+        # ninguna cuenta NET REAL queda en OTRO grupo (sin doble conteo)
+        for nombre, g in gh.items():
+            if nombre.startswith("NET REAL"):
+                continue
+            assert "51352001" not in g.cuentas_co, f"51352001 duplicada en {nombre}"
+            assert "41553503" not in g.cuentas_co
+            assert "700.0.0.101" not in g.cuentas_es
+
+
 def test_detect_co_sheets_export_mensual():
     # Export mensual de Siesa (nombres variables) -> reconoce balance/mov y mes
     bal, mov = ingest_svc._detect_co_sheets(["Consulta_ Mayor y balances ENER", "Rept Mov. Ctas. Aux"])
